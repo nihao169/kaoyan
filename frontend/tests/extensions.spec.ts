@@ -16,3 +16,13 @@ test(`教师真实导入 ${extension} 并核对原页`,async({page})=>{
 test('学生查看待诊断状态，教师打开转办和备课页面',async({page})=>{
   await login(page,'student');await page.getByRole('link',{name:'知识点诊断',exact:true}).click();await expect(page.getByRole('heading',{name:'知识点诊断',exact:true})).toBeVisible();await expect(page.getByText('待诊断',{exact:true}).first()).toBeVisible();await page.getByRole('button',{name:'退出登录'}).click();await login(page,'teacher');await page.getByRole('link',{name:'AI 备课',exact:true}).click();await expect(page.getByRole('button',{name:'生成教案草稿'})).toBeDisabled();await page.getByRole('link',{name:'学习困难转办',exact:true}).click();await expect(page.getByRole('heading',{name:'学习困难转办',exact:true})).toBeVisible();
 });
+test('未发布资料时诊断失败原因持续显示',async({page})=>{
+  await login(page,'student');
+  await page.getByRole('link',{name:'目标与安排',exact:true}).click();
+  await page.getByRole('button',{name:'保存并前往诊断'}).click();
+  await page.getByRole('button',{name:'开始基础诊断',exact:true}).click();
+  await expect(page.getByText('暂时无法开始诊断',{exact:true})).toBeVisible();
+  await expect(page.getByText('请教师在“教学内容”中打开待审核资料，点击“审核确认并发布”。仅“提交审核”还未完成发布；正式发布后，可返回这里重新开始诊断。',{exact:true})).toBeVisible();
+  await expect(page.locator('.ant-message-notice')).toHaveCount(0);
+  await expect(page.getByText('暂时无法开始诊断',{exact:true})).toBeVisible();
+});

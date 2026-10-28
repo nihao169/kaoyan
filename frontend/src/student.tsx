@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Card, Checkbox, Collapse, Form, Input, InputNumber, Modal, Progress, Radio, Select, Space, Statistic, Table, Tag } from 'antd';
 import { ArrowRightOutlined, CheckCircleOutlined, ClockCircleOutlined, FileTextOutlined, FlagOutlined, ReadOutlined } from '@ant-design/icons';
-import { api, key, kindName, type Attempt, type Catalog, type Contracts, type DraftInput, type Evaluation, type GoalInput, type Task } from './api';
+import { api, key, kindName, ApiError, type Attempt, type Catalog, type Contracts, type DraftInput, type Evaluation, type GoalInput, type Task } from './api';
 import { useUser } from './App';
 import { Blank, PageTitle, Sources, State, Status, date, useRun } from './ui';
 
@@ -57,13 +57,21 @@ export function Goals() {
 
 export function Diagnostic() {
   const {run,busy}=useRun();
+  const [startError,setStartError]=useState<{message:string;contentRequired:boolean}|null>(null);
   const catalog=useQuery({queryKey:['catalog'],queryFn:()=>api<Catalog>('/catalog')});
   const diag=useQuery({queryKey:['diagnostic'],queryFn:()=>api<Diag|null>('/diagnostics/current')});
   const goal=useQuery({queryKey:['goal'],queryFn:()=>api<GoalInput|null>('/goals/current')});
-    const d=diag.data;
+  const d=diag.data;
   const done=d?.tasks.filter(t=>t.state==='completed').length??0;
+  async function startDiagnostic(){
+    setStartError(null);
+    await run(async()=>{
+      try{return await api('/diagnostics','POST',{subject_id:goal.data?.subject_id})}
+      catch(error){setStartError({message:error instanceof Error?error.message:'开始诊断失败，请稍后重试。',contentRequired:error instanceof ApiError&&error.code==='CONTENT_REQUIRED'});throw error}
+    },'诊断已开始');
+  }
   return <><PageTitle title="基础诊断" description="用独立作答找到学习起点。诊断期间不提供提示、答案或资料检索。"/><Alert className="section-space" type="info" showIcon message="诊断只覆盖少量示例知识点" description="结果用于生成学习任务，不等同于全科掌握度或考试预测。未覆盖内容保持待诊断。"/><State query={diag}>
-    {!d?<Card><Blank description="先完成目标设置，再开始六个模块的代表题诊断。">{!goal.data?<Link to="/goals"><Button type="primary">设置目标</Button></Link>:<Button type="primary" loading={busy} disabled={!catalog.data?.subjects.length} onClick={()=>run(()=>api('/diagnostics','POST',{subject_id:goal.data?.subject_id}),'诊断已开始')}>开始基础诊断</Button>}</Blank></Card>:<>
+    {!d?<Card>{startError&&<Alert className="section-space" type="warning" showIcon message="暂时无法开始诊断" description={<><p>{startError.message}</p>{startError.contentRequired&&<p>请教师在“教学内容”中打开待审核资料，点击“审核确认并发布”。仅“提交审核”还未完成发布；正式发布后，可返回这里重新开始诊断。</p>}</>}/>}<Blank description="先完成目标设置，再开始六个模块的代表题诊断。">{!goal.data?<Link to="/goals"><Button type="primary">设置目标</Button></Link>:<Button type="primary" loading={busy} disabled={!catalog.data?.subjects.length} onClick={startDiagnostic}>开始基础诊断</Button>}</Blank></Card>:<>
     <div className="panel section-space"><div className="section-heading"><h2>{d.status==='completed'?'诊断已完成':'诊断进行中'}</h2><Tag color="green">{done} / {d.tasks.length} 题已提交</Tag></div><Progress percent={Math.round(done/d.tasks.length*100)}/></div>
     <div className="panel"><TaskList tasks={d.tasks}/></div>
     <div className="page-actions">{d.status==='active'?<Button type="primary" size="large" loading={busy} disabled={done!==d.tasks.length} onClick={()=>run(()=>api('/diagnostics/'+d.id+'/submit','POST'),'诊断已完成，学习任务已生成')}>结束诊断并生成学习安排</Button>:<Link to="/"><Button type="primary">查看学习任务 <ArrowRightOutlined aria-hidden/></Button></Link>}</div></>}
