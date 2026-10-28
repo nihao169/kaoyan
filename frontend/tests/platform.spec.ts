@@ -109,6 +109,77 @@ test.describe.serial('完整学习、评价与内容闭环',()=>{
     await expect(page.locator('.ant-table-tbody').getByText('第 1 阶段').first()).toBeVisible();
   });
 
+  async function openDraftEssay(page:Page){
+    const learner=await requests.newContext();
+    await data(learner,'/auth/login','POST',{username:'student',password:'Zhixing2026!'});
+    tokens.set(learner,(await data(learner,'/me')).csrf_token);
+    const plan=await data(learner,'/plans/today');
+    const essay=plan.all_tasks.find((t:{kind:string;state:string})=>t.kind==='essay'&&t.state==='todo');
+    expect(essay).toBeTruthy();
+    const attempt=await data(learner,'/tasks/'+essay.id+'/attempts','POST');
+    await login(page,'student');await page.goto('/study/'+essay.id);
+    await expect(page.getByRole('textbox',{name:'你的材料分析',exact:true})).toBeEnabled();
+    return {learner,attempt};
+  }
+
+  test('空答案提交失败后仍可继续输入和自动保存',async({page})=>{
+    const {learner,attempt}=await openDraftEssay(page);
+    await page.getByRole('button',{name:'提交作答',exact:true}).click();
+    await expect(page.getByText('请先保存答案再提交',{exact:true})).toBeVisible();
+    await page.getByRole('textbox',{name:'你的材料分析',exact:true}).fill('提交失败后继续填写材料分析。');
+    await page.getByRole('textbox',{name:'思考过程',exact:true}).fill('仍然保留最新思考过程。');
+    await expect.poll(async()=>(await data(learner,'/attempts/'+attempt.id)).response_text).toBe('提交失败后继续填写材料分析。');
+    expect((await data(learner,'/attempts/'+attempt.id)).process).toBe('仍然保留最新思考过程。');
+    await expect(page.getByText('已保存到服务器',{exact:true})).toBeVisible();
+    await learner.dispose();
+  });
+
+  test('自动保存尚未返回时手动保存会补存最新输入',async({page})=>{
+    const {learner,attempt}=await openDraftEssay(page);
+    let release!:()=>void;let entered!:()=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve});
+    const reached=new Promise<void>(resolve=>{entered=resolve});
+    let first=true;
+    const conflicts:number[]=[];
+    page.on('response',r=>{if(r.url().endsWith('/draft')&&r.status()===409)conflicts.push(r.status())});
+    await page.route('**/attempts/*/draft',async route=>{
+      if(!first){await route.continue();return}
+      first=false;const response=await route.fetch();entered();await gate;await route.fulfill({response});
+    });
+    await page.getByRole('textbox',{name:'你的材料分析',exact:true}).fill('自动保存中的材料分析。');
+    await reached;
+    await page.getByRole('textbox',{name:'思考过程',exact:true}).fill('保存请求发出后新增的过程也必须保存。');
+    const click=page.getByRole('button',{name:'保存草稿',exact:true}).click();
+    release();await click;
+    await expect.poll(async()=>(await data(learner,'/attempts/'+attempt.id)).process).toBe('保存请求发出后新增的过程也必须保存。');
+    expect(conflicts).toEqual([]);
+    await learner.dispose();
+  });
+
+  test('提示更新版本后保存不会覆盖或误报冲突',async({page})=>{
+    const {learner,attempt}=await openDraftEssay(page);
+    await data(learner,'/attempts/'+attempt.id+'/hints','POST',{level:1});
+    await page.getByRole('textbox',{name:'思考过程',exact:true}).fill('提示更新版本后继续写自己的思考。');
+    await page.getByRole('button',{name:'保存草稿',exact:true}).click();
+    await expect(page.getByText('已保存到服务器',{exact:true})).toBeVisible();
+    const saved=await data(learner,'/attempts/'+attempt.id);
+    expect(saved.process).toBe('提示更新版本后继续写自己的思考。');expect(saved.hint_level).toBe(1);
+    await learner.dispose();
+  });
+
+  test('其他页面更改答案时保留冲突而不静默覆盖',async({page})=>{
+    const {learner,attempt}=await openDraftEssay(page);
+    await data(learner,'/attempts/'+attempt.id+'/draft','PATCH',{answer:attempt.answer,response_text:'另一页面保存的答案',process:attempt.process,duration_seconds:attempt.duration_seconds,revision:attempt.revision});
+    await page.getByRole('textbox',{name:'你的材料分析',exact:true}).fill('当前页面尚未保存的答案');
+    await page.getByRole('button',{name:'保存草稿',exact:true}).click();
+    await expect(page.getByText('草稿存在其他页面的修改',{exact:true})).toBeVisible();
+    expect((await data(learner,'/attempts/'+attempt.id)).response_text).toBe('另一页面保存的答案');
+    await expect(page.getByRole('textbox',{name:'你的材料分析',exact:true})).toHaveValue('当前页面尚未保存的答案');
+    await page.getByRole('button',{name:'读取服务器草稿',exact:true}).click();
+    await expect(page.getByRole('textbox',{name:'你的材料分析',exact:true})).toHaveValue('另一页面保存的答案');
+    await learner.dispose();
+  });
+
   test('分析题人工评分、学生异议和教师修订',async({page})=>{
     const learner=await requests.newContext();
     await data(learner,'/auth/login','POST',{username:'student',password:'Zhixing2026!'});

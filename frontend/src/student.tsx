@@ -100,36 +100,77 @@ function AttemptEditor({initial,onReload}:{initial:Attempt;onReload:()=>unknown}
   const [appealText,setAppealText]=useState('');
   const saving=useRef<Promise<Attempt>|null>(null);
   const snapshot=useRef({answer,text,process});
+  const savedContent=useRef({answer:initial.answer,response_text:initial.response_text,process:initial.process});
+  const latestAttempt=useRef(initial);
+  const [draftConflict,setDraftConflict]=useState(false);
   const started=useRef(Date.now());
   const baseDuration=useRef(initial.duration_seconds);
   const {run,busy}=useRun();
-  const {message}=App.useApp();
-  const client=useQueryClient();
-  useEffect(()=>{setAttempt(initial)},[initial]);
+  const contentOf=(a:Attempt)=>({answer:a.answer,response_text:a.response_text,process:a.process});
+  const matches=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+  const acceptAttempt=useCallback((value:Attempt)=>{
+    if(value.revision>=latestAttempt.current.revision){latestAttempt.current=value;setAttempt(value)}
+  },[]);
+  useEffect(()=>{acceptAttempt(initial)},[initial,acceptAttempt]);
   snapshot.current={answer,text,process};
-  const save=useCallback(async()=>{
-    if (saving.current) return saving.current;
-    const draft=snapshot.current;
-    const request=api<Attempt>('/attempts/'+attempt.id+'/draft','PATCH',{
-      answer:draft.answer,response_text:draft.text,process:draft.process,
-      duration_seconds:Math.min(86400,baseDuration.current+Math.floor((Date.now()-started.current)/1000)),revision:attempt.revision,
-    } satisfies DraftInput);
-    saving.current=request;
+  const save=useCallback(async function saveLatest():Promise<Attempt>{
+    if(saving.current){
+      const saved=await saving.current;
+      const current=snapshot.current;
+      return matches(contentOf(saved),{answer:current.answer,response_text:current.text,process:current.process})?saved:saveLatest();
+    }
+    const local=snapshot.current;
+    const draft={answer:local.answer,response_text:local.text,process:local.process};
     setSaveState('正在保存…');
-    try {
-      const saved=await request;
-      setAttempt(saved);
-      if (JSON.stringify(snapshot.current)===JSON.stringify(draft)) setDirty(false);
-      setSaveState('已保存到服务器');
-      return saved;
-    } catch(e){setSaveState('保存失败，当前输入尚未同步');throw e}
-    finally {saving.current=null}
-  },[attempt.id,attempt.revision]);
+    const operation=(async()=>{
+      for(let retry=0;retry<2;retry++){
+        const current=await api<Attempt>('/attempts/'+initial.id);
+        if(current.status!=='draft'){
+          acceptAttempt(current);setDraftConflict(true);
+          throw new Error('作答已在其他页面提交，当前输入未写入。请读取服务器记录。');
+        }
+        // A new revision may only record a hint/AI event. Rebase only when
+        // the answer is unchanged, or the server already has this exact draft.
+        if(!matches(contentOf(current),savedContent.current)&&!matches(contentOf(current),draft)){
+          setDraftConflict(true);
+          throw new Error('其他页面修改了此草稿，当前输入已保留，未覆盖服务器内容。');
+        }
+        try{
+          const saved=await api<Attempt>('/attempts/'+initial.id+'/draft','PATCH',{
+            ...draft,duration_seconds:Math.min(86400,baseDuration.current+Math.floor((Date.now()-started.current)/1000)),revision:current.revision,
+          } satisfies DraftInput);
+          savedContent.current=contentOf(saved);acceptAttempt(saved);setDraftConflict(false);
+          const now=snapshot.current;
+          if(matches(draft,{answer:now.answer,response_text:now.text,process:now.process}))setDirty(false);
+          setSaveState('已保存到服务器');return saved;
+        }catch(error){
+          if(error instanceof ApiError&&error.code==='STALE_REVISION'&&retry===0)continue;
+          throw error;
+        }
+      }
+      throw new Error('草稿正在更新，请稍后重试。');
+    })();
+    saving.current=operation;
+    let saved:Attempt;
+    try{saved=await operation}catch(error){setSaveState('保存失败，当前输入尚未同步');throw error}
+    finally{if(saving.current===operation)saving.current=null}
+    const now=snapshot.current;
+    if(!matches(contentOf(saved),{answer:now.answer,response_text:now.text,process:now.process}))return saveLatest();
+    return saved;
+  },[initial.id,acceptAttempt]);
   useEffect(()=>{
-    if (!dirty||attempt.status!=='draft'||busy) return;
+    if(!dirty||attempt.status!=='draft'||busy||draftConflict)return;
     const timer=setTimeout(()=>{save().catch(()=>{})},1000);
     return()=>clearTimeout(timer);
-  },[answer,text,process,dirty,attempt.status,save,busy]);
+  },[answer,text,process,dirty,attempt.status,save,busy,draftConflict]);
+  async function loadServerDraft(){
+    await run(async()=>{
+      const current=await api<Attempt>('/attempts/'+initial.id);
+      savedContent.current=contentOf(current);acceptAttempt(current);
+      setAnswer(current.answer);setText(current.response_text);setProcess(current.process);
+      setDirty(false);setDraftConflict(false);setSaveState('已读取服务器最新记录');return current;
+    });
+  }
   useEffect(()=>{
     const warn=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};
     window.addEventListener('beforeunload',warn);
@@ -140,25 +181,22 @@ function AttemptEditor({initial,onReload}:{initial:Attempt;onReload:()=>unknown}
   async function submit(){
     await run(async()=>{
       await save();
-      // If an autosave was already in flight, persist the most recent input again.
-      const current=await api<Attempt>('/attempts/'+attempt.id);
-      const latest=snapshot.current;
-      await api('/attempts/'+attempt.id+'/draft','PATCH',{answer:latest.answer,response_text:latest.text,process:latest.process,duration_seconds:Math.min(86400,baseDuration.current+Math.floor((Date.now()-started.current)/1000)),revision:current.revision});
       const submitted=await api<Attempt>('/attempts/'+attempt.id+'/submit','POST',undefined,key());
-      setDirty(false);setAttempt(submitted);await onReload();return submitted;
+      setDirty(false);acceptAttempt(submitted);await onReload();return submitted;
     },'作答已提交并保存');
   }
   return <><PageTitle title={attempt.mode==='diagnostic'?'独立完成诊断':attempt.mode==='review'?'到期复习':attempt.mode==='verification'?'补学后的新题验证':'专注完成这道题'} description={attempt.reason} action={<Link to={attempt.mode==='diagnostic'?'/diagnostic':'/'}><Button>返回任务</Button></Link>}/>
+    {draftConflict&&<Alert className="section-space" type="warning" showIcon message="草稿存在其他页面的修改" description="当前输入仍保留在本页，系统没有覆盖服务器内容。确认需要采用服务器记录后，再点击读取。" action={<Button onClick={loadServerDraft} loading={busy}>读取服务器草稿</Button>}/>}
     <div className="study-layout"><section className="panel question-panel"><div className="question-meta"><Tag color="green">{kindName(q.kind)}</Tag><span>{q.max_score} 分</span><span>题目版本 {q.number}</span><Status value={attempt.status}/></div><h2 className="question-prompt">{q.prompt}</h2>
       {q.kind==='multiple'&&<p className="muted">多选题全部选对得分，多选、漏选、错选均不得分。</p>}
-      {q.kind==='single'?<Radio.Group className="answer-options" value={answer[0]} disabled={!editable} onChange={e=>{setAnswer([e.target.value]);setDirty(true)}}>{Object.entries(q.options).map(([label,value])=><Radio key={label} value={label}><span className="option-label">{label}</span>{value}</Radio>)}</Radio.Group>:q.kind==='multiple'?<div className="answer-options" role="group" aria-label="多选答案">{Object.entries(q.options).map(([label,value])=><Checkbox key={label} value={label} checked={answer.includes(label)} disabled={!editable} onChange={e=>{const checked=e.target.checked;setAnswer(previous=>checked?[...previous.filter(v=>v!==label),label]:previous.filter(v=>v!==label));setDirty(true)}}><span className="option-label">{label}</span>{value}</Checkbox>)}</div>:<div className="essay-answer"><label>你的材料分析</label><Input.TextArea aria-label="你的材料分析" value={text} onChange={e=>{setText(e.target.value);setDirty(true)}} disabled={!editable} rows={9} maxLength={20000} showCount placeholder="结合原理与材料，写下你的分析…"/></div>}
-      <div className="process-area"><label>思考过程 <span>帮助你回看思路，也帮助教师理解你的判断</span></label><Input.TextArea aria-label="思考过程" value={process} onChange={e=>{setProcess(e.target.value);setDirty(true)}} rows={4} maxLength={10000} disabled={!editable} placeholder="为什么这样选择？哪些地方还不确定？"/></div>
+      {q.kind==='single'?<Radio.Group className="answer-options" value={answer[0]} disabled={!editable||busy} onChange={e=>{setAnswer([e.target.value]);setDirty(true)}}>{Object.entries(q.options).map(([label,value])=><Radio key={label} value={label}><span className="option-label">{label}</span>{value}</Radio>)}</Radio.Group>:q.kind==='multiple'?<div className="answer-options" role="group" aria-label="多选答案">{Object.entries(q.options).map(([label,value])=><Checkbox key={label} value={label} checked={answer.includes(label)} disabled={!editable||busy} onChange={e=>{const checked=e.target.checked;setAnswer(previous=>checked?[...previous.filter(v=>v!==label),label]:previous.filter(v=>v!==label));setDirty(true)}}><span className="option-label">{label}</span>{value}</Checkbox>)}</div>:<div className="essay-answer"><label>你的材料分析</label><Input.TextArea aria-label="你的材料分析" value={text} onChange={e=>{setText(e.target.value);setDirty(true)}} disabled={!editable||busy} rows={9} maxLength={20000} showCount placeholder="结合原理与材料，写下你的分析…"/></div>}
+      <div className="process-area"><label>思考过程 <span>帮助你回看思路，也帮助教师理解你的判断</span></label><Input.TextArea aria-label="思考过程" value={process} onChange={e=>{setProcess(e.target.value);setDirty(true)}} rows={4} maxLength={10000} disabled={!editable||busy} placeholder="为什么这样选择？哪些地方还不确定？"/></div>
       {editable?<div className="answer-footer"><span className={saveState.startsWith('保存失败')?'save-error':'muted'}>{saveState}</span><Space><Button aria-label="保存草稿" loading={busy} onClick={()=>run(save)}>保存草稿</Button><Button aria-label="提交作答" type="primary" loading={busy} onClick={submit}>提交作答</Button></Space></div>:<Alert type={attempt.status==='pending_teacher'?'info':'success'} showIcon message={attempt.status==='pending_teacher'?'分析题已提交，等待教师评分':'作答记录已保存'} description={attempt.mode==='diagnostic'&&!attempt.evaluation?'结束全部诊断后统一查看结果。':'原始答案与提示使用情况已记录，提交后不再覆盖。'}/>}
       {attempt.evaluation&&<div className="evaluation-box"><div className="section-heading"><h2>本次评价</h2><strong className="score">{attempt.evaluation.score}<small> / {q.max_score}</small></strong></div><p>{attempt.evaluation.feedback}</p><Tag>{attempt.evaluation.method==='teacher'?'教师评价':'规则评分'} · 第 {attempt.evaluation.revision} 次评价</Tag><Button type="link" onClick={()=>setAppeal(true)}>对评价有异议？</Button></div>}
       {q.explanation&&<div className="analysis-box"><h3>审核解析</h3><p>{q.explanation}</p>{q.answer&&q.answer.length>0&&<p>正确选项：<strong>{q.answer.join('、')}</strong></p>}</div>}
       {attempt.remediation_id&&<div className="page-actions"><Link to="/mistakes"><Button type="primary" icon={<ReadOutlined aria-hidden/>}>确认错因并开始补学</Button></Link></div>}
     </section><aside className="study-aside"><Card title={attempt.mode==='diagnostic'?'诊断规则':'循序获得帮助'}>
-      {attempt.mode==='diagnostic'?<p className="muted">请独立完成。诊断期间不提供提示、解析和资料检索。</p>:<><p className="muted">先独立思考，再逐级使用提示。使用情况将计入学习记录。</p><div className="hint-levels">{['相关概念','突破口','分步引导','完整解析'].map((label,i)=><Button key={label} block disabled={!editable||i>attempt.hint_level} loading={busy} onClick={()=>run(async()=>{await save();const result=await api<{text:string;level:number;revision:number}>('/attempts/'+attempt.id+'/hints','POST',{level:i+1});setHint(result);setAttempt(a=>({...a,hint_level:Math.max(a.hint_level,i+1),revision:result.revision}));return result})}>{i+1}. {label}{i<attempt.hint_level?' · 已查看':''}</Button>)}</div>{hint&&<div className="hint-content"><Tag>审核教学内容</Tag><p>{hint.text}</p></div>}<p className="small-note">已使用 {attempt.hint_level} 级提示。有提示的正确作答与独立完成分别记录。</p></>}
+      {attempt.mode==='diagnostic'?<p className="muted">请独立完成。诊断期间不提供提示、解析和资料检索。</p>:<><p className="muted">先独立思考，再逐级使用提示。使用情况将计入学习记录。</p><div className="hint-levels">{['相关概念','突破口','分步引导','完整解析'].map((label,i)=><Button key={label} block disabled={!editable||i>attempt.hint_level} loading={busy} onClick={()=>run(async()=>{await save();const result=await api<{text:string;level:number;revision:number}>('/attempts/'+attempt.id+'/hints','POST',{level:i+1});setHint(result);const current=await api<Attempt>('/attempts/'+attempt.id);acceptAttempt(current);return result})}>{i+1}. {label}{i<attempt.hint_level?' · 已查看':''}</Button>)}</div>{hint&&<div className="hint-content"><Tag>审核教学内容</Tag><p>{hint.text}</p></div>}<p className="small-note">已使用 {attempt.hint_level} 级提示。有提示的正确作答与独立完成分别记录。</p></>}
     </Card>{attempt.mode!=='diagnostic'&&<AILearning attemptId={attempt.id} draft={editable} essay={q.kind==='essay'} hintLevel={attempt.hint_level} beforeRun={async()=>{if(editable)await save()}} afterRun={onReload}/>}</aside></div>
     {attempt.sources&&<section className="panel section-space"><h2>资料依据</h2><Sources items={attempt.sources}/></section>}
     <Modal title="提出评价异议" okText="提交异议" open={appeal} onCancel={()=>setAppeal(false)} confirmLoading={busy} onOk={()=>run(async()=>{if(!appealText.trim())throw new Error('请填写异议说明');const result=await api('/evaluations/'+attempt.evaluation?.id+'/review-cases','POST',{reason:appealText});setAppeal(false);return result},'已提交教师复核')}><p>请说明你认为需要重新核对的部分，教师会保留原评价并给出复核意见。</p><Input.TextArea aria-label="异议说明" rows={4} value={appealText} onChange={e=>setAppealText(e.target.value)} maxLength={5000}/></Modal>
