@@ -1,6 +1,6 @@
 import hashlib
 import re
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_
 from . import models as m
 from .auth import need, source_allowed
 from .errors import fail, require
@@ -49,7 +49,23 @@ def parse_chunks(db, version):
 def create_source(db, ctx, data):
     if not (ctx.has('teacher') or ctx.has('admin')):
         fail(403, 'ROLE_REQUIRED', '需要内容管理权限')
-    knowledge = require(db.get(m.KnowledgePoint, data.knowledge_id), '知识点不存在')
+    if data.knowledge_id:
+        knowledge = require(db.get(m.KnowledgePoint, data.knowledge_id), '知识点不存在')
+        if knowledge.org_id and knowledge.org_id != ctx.org_id:
+            fail(404, 'NOT_FOUND', '知识点不存在')
+    else:
+        module = db.scalar(select(m.Module).where(m.Module.name == '教师资料'))
+        if not module:
+            subject = require(db.scalar(select(m.Subject).where(m.Subject.code == 'politics')))
+            module = m.Module(subject_id=subject.id, name='教师资料', position=100)
+            db.add(module)
+            db.flush()
+        knowledge = db.scalar(select(m.KnowledgePoint).where(m.KnowledgePoint.module_id == module.id,
+                              m.KnowledgePoint.org_id == ctx.org_id, m.KnowledgePoint.name == '待提取知识'))
+        if not knowledge:
+            knowledge = m.KnowledgePoint(module_id=module.id, org_id=ctx.org_id, name='待提取知识')
+            db.add(knowledge)
+            db.flush()
     if data.visibility == 'class':
         cls = require(db.get(m.TeachingClass, data.class_id))
         if cls.org_id != ctx.org_id or not (ctx.has('admin') or any(r.role == 'teacher' and (r.class_id is None or r.class_id == cls.id) for r in ctx.roles)):
@@ -157,6 +173,9 @@ def available_questions(db, ctx, knowledge_id=None):
         stmt = stmt.where(m.QuestionVersion.knowledge_id == knowledge_id)
     result = []
     for q in db.scalars(stmt.order_by(m.QuestionVersion.created_at, m.QuestionVersion.id)):
+        generated = db.scalar(select(m.GeneratedQuestion).where(m.GeneratedQuestion.question_version_id == q.id))
+        if generated and (generated.disabled or (generated.owner_membership_id and generated.owner_membership_id != ctx.membership.id)):
+            continue
         v = db.get(m.SourceVersion, q.source_version_id)
         source = db.get(m.Source, v.source_id)
         latest = db.scalar(select(func.max(m.SourceVersion.number)).where(m.SourceVersion.source_id == v.source_id, m.SourceVersion.status == 'published'))
@@ -173,7 +192,9 @@ def retrieve(db, ctx, query='', knowledge_id=None, version_id=None, limit=5):
     else:
         stmt = stmt.where(m.SourceVersion.status == 'published')
     if knowledge_id:
-        stmt = stmt.where(m.SourceVersion.knowledge_id == knowledge_id)
+        stmt = stmt.where(or_(m.SourceVersion.knowledge_id == knowledge_id,
+            select(m.SourceKnowledge.id).where(m.SourceKnowledge.version_id == m.SourceVersion.id,
+                m.SourceKnowledge.knowledge_id == knowledge_id).exists()))
     tokens = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{2,}', query.lower())
     pairs = [t[i:i+2] for t in tokens for i in range(len(t)-1)]
     results = []

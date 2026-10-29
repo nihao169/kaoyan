@@ -4,6 +4,7 @@ import hashlib
 import shutil
 import subprocess
 import tempfile
+import re
 from sqlalchemy import select, delete
 from .config import settings
 from . import models as m
@@ -61,14 +62,19 @@ def parse_document(db, version_id, release_transaction=False):
         with fitz.open(settings.data_dir / 'files' / preview_key) as pdf:
             if pdf.needs_pass:
                 raise DocumentError('PDF_ENCRYPTED')
-            if len(pdf) > 300:
+            if len(pdf) > 1000:
                 raise DocumentError('DOCUMENT_PAGE_LIMIT')
             pages = []
+            chapter = '原文'
             for i, page in enumerate(pdf):
                 blocks = [{'bbox': list(b[:4]), 'text': b[4].strip()} for b in page.get_text('blocks') if b[4].strip()]
                 if not blocks or (sum(len(b['text'].strip()) for b in blocks) < 30 and page.get_images()):
                     raise DocumentError('SCANNED_PAGE_OCR_UNSUPPORTED')
-                pages.append({'number': i + 1, 'width': page.rect.width, 'height': page.rect.height, 'blocks': blocks})
+                for line in '\n'.join(b['text'] for b in blocks[:3]).splitlines()[:10]:
+                    if re.match(r'^\s*(第[一二三四五六七八九十百零\d]+[章节]|[一二三四五六七八九十]+[、．.])',line):
+                        chapter=line.strip()[:180]
+                        break
+                pages.append({'number': i + 1, 'width': page.rect.width, 'height': page.rect.height, 'blocks': blocks,'heading':chapter})
             if not pages:
                 raise DocumentError('DOCUMENT_EMPTY')
         if release_transaction:
@@ -85,7 +91,7 @@ def parse_document(db, version_id, release_transaction=False):
         for page in pages:
             text = '\n\n'.join(b['text'] for b in page['blocks'])
             texts.append(text)
-            db.add(m.SourceChunk(version_id=version.id, position=page['number'], heading=f"第 {page['number']} 页", text=text))
+            db.add(m.SourceChunk(version_id=version.id, position=page['number'], heading=f"{page.get('heading','原文')} · 第 {page['number']} 页", text=text))
         version.text = '\n\n'.join(texts)
         version.file_key = LocalFileStore(settings.data_dir / 'files').put(version.text.encode('utf-8'))
         version.sha256 = hashlib.sha256(version.text.encode('utf-8')).hexdigest()

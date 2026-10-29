@@ -29,11 +29,9 @@ if (-not $SkipInstall) {
 if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
 & $pythonPath -m app.seed
 if ($LASTEXITCODE -ne 0) { throw 'Demo initialization failed.' }
-& $pythonPath scripts/attach_sample_pages.py
-if ($LASTEXITCODE -ne 0) { throw 'Original sample page initialization failed.' }
 if ($DownloadModel) {
     & $pythonPath scripts/setup_models.py --download --reindex
     if ($LASTEXITCODE -ne 0) { throw 'Local embedding model setup failed. Content cannot be submitted until the model is ready.' }
 }
-Write-Host 'Initialized. Teaching content remains draft until a teacher reviews and publishes it.'
+Write-Host 'Initialized accounts and configuration. Upload your own teaching material through the platform.'
 Write-Host 'Next: powershell -ExecutionPolicy Bypass -File scripts/start.ps1'

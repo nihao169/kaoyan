@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Collapse, Form, Input, InputNumber, Modal, Radio, Select, Space, Table, Tag } from 'antd';
 import { ArrowLeftOutlined, CheckOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
@@ -7,6 +7,7 @@ import { api, key, kindName, type Catalog, type Contracts, type QuestionInput } 
 import { useUser } from './App';
 import { Blank, PageTitle, State, Status, useRun } from './ui';
 import { DocumentPreview, IndexStatus } from './extensions';
+import { GenerationPanel } from './agents';
 
 type SourceItem = Contracts['SourceListItemOutput'];
 type CardItem = Contracts['CardOutput'];
@@ -31,21 +32,21 @@ export function ContentList() {
       let result:{id:string};
       if(importType==='file') {
         if(!file)throw new Error('请选择 PDF、DOCX、Markdown 或 TXT 文件');
-        const body=new FormData();body.append('knowledge_id',values.knowledge_id);body.append('rights',values.rights);body.append('file',file);
+        const body=new FormData();if(values.knowledge_id)body.append('knowledge_id',values.knowledge_id);body.append('rights',values.rights);body.append('file',file);
         result=await api('/content/sources/upload','POST',body);
       } else result=await api('/content/sources','POST',values);
       setOpen(false);navigate('/sources/'+result.id);return result;
     },'资料已保存为草稿');
   }
-  return <><PageTitle title="教学内容" description="原文、知识卡和题目按版本关联。先核对，再发布，历史引用始终可追溯。" action={<Button type="primary" icon={<PlusOutlined aria-hidden/>} onClick={()=>{form.resetFields();setFile(null);setOpen(true)}}>导入新资料</Button>}/>
-    <Alert className="section-space" type="info" showIcon message="原创演示内容需要教师确认发布" description="初始资料均为草稿。请打开资料核对原文、知识卡、题目答案和评分要点，再提交审核并发布。机构管理员可编辑草稿，发布需要教师角色。"/>
+  return <><PageTitle title="教学内容" description="上传教师原文，一次启用后由 Agent 提取知识并生成题目。" action={<Button type="primary" icon={<PlusOutlined aria-hidden/>} onClick={()=>{form.resetFields();setFile(null);setOpen(true)}}>导入新资料</Button>}/>
+    <Alert className="section-space" type="info" showIcon message="上传原文，一次启用，Agent 自动出题" description="打开资料，待解析和索引就绪后点击“启用并生成”。生成通过校验的题目可用于班级作业，无需反复提交审核或填写发布说明。历史演示题与新生成题分开保留。"/>
     <State query={query}><Table rowKey="id" dataSource={query.data?.items??[]} pagination={{current:page,pageSize:20,total:query.data?.total??0,onChange:setPage,showSizeChanger:false}} scroll={{x:850}} columns={[
-      {title:'资料名称',render:(_,r)=><Link to={'/sources/'+r.id}>{r.title}</Link>},{title:'版本',dataIndex:'number',render:n=>`V${n}`,width:80},{title:'状态',dataIndex:'status',render:v=><Status value={v}/>,width:100},{title:'使用范围',dataIndex:'visibility',render:v=>({organization:'本机构',class:'指定班级',private:'仅本人'}[v as string]??v),width:100},{title:'审核说明',dataIndex:'review_note',render:v=>v||'等待核对'},{title:'操作',render:(_,r)=><Link to={'/sources/'+r.id}><Button>核对与管理</Button></Link>,width:130},
+      {title:'资料名称',render:(_,r)=><Link to={'/sources/'+r.id}>{r.title}</Link>},{title:'版本',dataIndex:'number',render:n=>`V${n}`,width:80},{title:'原文状态',render:(_,r)=><Tag color={r.enabled?'green':'default'}>{r.status==='withdrawn'?'已撤回':r.enabled?'已启用':'待启用'}</Tag>,width:100},{title:'生成状态',dataIndex:'generation_state',render:v=>({queued:'等待处理',running:'Agent处理中',succeeded:'题目已校验可用',failed:'需处理'}[v as string]??'尚未生成')},{title:'使用范围',dataIndex:'visibility',render:v=>({organization:'本机构',class:'指定班级',private:'仅本人'}[v as string]??v),width:100},{title:'操作',render:(_,r)=><Link to={'/sources/'+r.id}><Button>打开资料与生成</Button></Link>,width:150},
     ]}/></State>
     <Modal title="导入教学资料" open={open} onCancel={()=>setOpen(false)} footer={null} width={680}><Form form={form} layout="vertical" onFinish={create} initialValues={{rights:'原创资料，允许在本机构教学中使用'}} requiredMark={false}>
       <Radio.Group className="section-space" value={importType} onChange={e=>setImportType(e.target.value)} options={[{value:'text',label:'输入正文'},{value:'file',label:'上传文件'}]}/>
-      {importType==='text'?<><Form.Item name="title" label="资料名称" rules={[{required:true}]}><Input maxLength={200}/></Form.Item><Form.Item name="text" label="原文正文" rules={[{required:true}]}><Input.TextArea rows={8} maxLength={500000} placeholder="可使用 Markdown 标题组织章节；发布前请核对正文。"/></Form.Item></>:<div className="upload-field"><label htmlFor="source-file">选择 PDF / DOCX / Markdown / TXT（文本文件 UTF-8，最大 5 MB）</label><input id="source-file" type="file" accept=".pdf,.docx,.md,.txt" onChange={e=>setFile(e.target.files?.[0]??null)}/></div>}
-      <Form.Item name="knowledge_id" label="对应知识点" rules={[{required:true}]}><Select options={catalog.data?.knowledge.map(k=>({value:k.id,label:k.name}))}/></Form.Item><Form.Item name="rights" label="来源与使用授权说明" rules={[{required:true}]}><Input.TextArea rows={2} maxLength={2000}/></Form.Item><Button htmlType="submit" type="primary" loading={busy} icon={<UploadOutlined aria-hidden/>}>保存为草稿</Button>
+      {importType==='text'?<><Form.Item name="title" label="资料名称" rules={[{required:true}]}><Input maxLength={200}/></Form.Item><Form.Item name="text" label="原文正文" rules={[{required:true}]}><Input.TextArea rows={8} maxLength={500000} placeholder="可使用 Markdown 标题组织章节，知识点由Agent提取。"/></Form.Item></>:<div className="upload-field"><label htmlFor="source-file">选择文字型 PDF / DOCX / Markdown / TXT（文本文件 UTF-8，最大 50 MB，最多1000页；扫描件暂不支持）</label><input id="source-file" type="file" accept=".pdf,.docx,.md,.txt" onChange={e=>setFile(e.target.files?.[0]??null)}/></div>}
+      <p>默认科目：考研政治。可上传课本或补充资料，启用后自动提取多个知识点。</p><Form.Item name="rights" label="来源与使用授权" rules={[{required:true}]}><Input.TextArea rows={2} maxLength={2000}/></Form.Item><Button htmlType="submit" type="primary" loading={busy} icon={<UploadOutlined aria-hidden/>}>上传并解析</Button>
     </Form></Modal>
   </>;
 }
@@ -56,6 +57,8 @@ export function SourceView() {
 }
 
 function SourcePage({versionId}:{versionId:string}) {
+  const [location]=useSearchParams();
+  const targetChunk=location.get('chunk');
   const user=useUser();
   const editor=user.roles.some(r=>['teacher','admin'].includes(r));
   const teacher=user.roles.includes('teacher');
@@ -78,10 +81,7 @@ function SourcePage({versionId}:{versionId:string}) {
     await run(async()=>{const result=await api('/content/sources/'+versionId+'/'+action,'POST',{note},key());setAction(null);setNote('');return result},'内容状态已更新');
   }
   return <><PageTitle title={source?.title??'资料原文'} description="定位到真实原文与具体版本。所有内容由系统保存，不使用模型生成的虚构出处。" action={<Link to={editor?'/content':'/mistakes'}><Button icon={<ArrowLeftOutlined aria-hidden/>}>返回{editor?'内容列表':'补学'}</Button></Link>}/><State query={query}>{source&&<>
-    {editor&&<IndexStatus versionId={versionId}/>}<DocumentPreview versionId={versionId} teacher={teacher&&source.status==='draft'}/><div className="source-toolbar"><Space wrap><Status value={source.status}/><Tag>版本 {source.number}</Tag><Tag>{source.rights}</Tag></Space>{editor&&<Space wrap>
-      {writable&&teacher&&<Button disabled={index.data?.state!=='ready'} type="primary" onClick={()=>{setAction('submit');setNote('')}}>提交审核</Button>}
-      {source.status==='pending'&&teacher&&<Button disabled={index.data?.state!=='ready'} type="primary" icon={<CheckOutlined aria-hidden/>} onClick={()=>{setAction('publish');setNote('')}}>审核确认并发布</Button>}
-      {source.status==='pending'&&teacher&&<Button onClick={()=>{setAction('reject');setNote('')}}>退回草稿</Button>}
+      {editor&&<GenerationPanel versionId={versionId} teacher={teacher}/>}<DocumentPreview versionId={versionId} teacher={teacher&&source.status==='draft'}/><div className="source-toolbar"><Space wrap><Tag>原文版本 {source.number}</Tag><Tag>{source.rights}</Tag>{!source.document_info&&<a href={'/api/v1/sources/versions/'+versionId+'/original'}>下载原始文本</a>}</Space>{editor&&<Space wrap>
       {source.status==='published'&&teacher&&<Button danger onClick={()=>{setAction('withdraw');setNote('')}}>撤回发布</Button>}
       {['published','withdrawn'].includes(source.status)&&teacher&&<Button loading={busy} onClick={()=>run(async()=>{const result=await api<{id:string}>('/content/sources/'+source.id+'/versions','POST');navigate('/sources/'+result.id);return result},'已创建新版本草稿')}>创建修订版本</Button>}
     </Space>}</div>
@@ -90,7 +90,7 @@ function SourcePage({versionId}:{versionId:string}) {
     <div className={editor?'source-columns':'source-reader'}><section className="panel source-text"><div className="section-heading"><h2>资料原文</h2>{writable&&!source.document_info&&<Button loading={busy} disabled={text===source.text} onClick={()=>run(()=>api('/content/sources/'+source.id,'PATCH',{text,revision:source.revision}),'正文已保存')}>保存正文</Button>}</div>
       {writable&&!source.document_info?<Input.TextArea aria-label="资料原文正文" rows={22} value={text} onChange={e=>setText(e.target.value)} maxLength={500000}/>:<div className="article-text">{source.text.split(/\n\s*\n/).map((p,i)=>p.startsWith('#')?<h3 key={i}>{p.replace(/^#+\s*/,'')}</h3>:<p key={i}>{p}</p>)}</div>}
       <div className="small-note">章节与段落定位，不提供虚构页码。正文摘要用于版本核对。</div>
-      <Collapse items={[{key:'locations',label:'查看原文段落位置',children:source.chunks.map(c=><div className="source-chunk" key={c.id} id={c.id}><Tag>第 {c.position} 段</Tag><strong>{c.heading}</strong><p>{c.text}</p></div>)}]}/>
+      <Collapse defaultActiveKey={targetChunk?['locations']:[]} items={[{key:'locations',label:'查看原文段落位置',children:source.chunks.map(c=><div className="source-chunk" key={c.id} id={c.id} style={c.id===targetChunk?{background:'#fff8d8',borderLeft:'3px solid #b58935',padding:12}:undefined}><Tag>第 {c.position} 段</Tag><strong>{c.heading}</strong><p>{c.text}</p></div>)}]}/>
     </section><section><div className="panel"><div className="section-heading"><h2>关联知识卡</h2>{writable&&<Button icon={<PlusOutlined aria-hidden/>} onClick={()=>setCardEditor('new')}>添加知识卡</Button>}</div>{!source.cards.length?<Blank description="尚未添加知识卡"/>:source.cards.map(card=><div className="content-card" key={card.id}><div className="section-heading"><h3>{card.title}</h3>{writable&&<Button type="link" onClick={()=>setCardEditor(card)}>编辑</Button>}</div><p>{card.body}</p><Status value={card.status}/>{teacher&&writable&&<Select aria-label="知识卡适用错因" mode="multiple" style={{width:'100%',marginTop:12}} placeholder="选择此卡适用的错因" value={card.causes??[]} options={['概念混淆','原理适用','材料理解','论证表达','审题','时间管理'].map(c=>({value:c,label:c}))} onChange={causes=>run(()=>api('/content/cards/'+card.id+'/causes','PUT',{causes}),'知识卡错因关联已保存')}/>}</div>)}</div>
       {editor&&<div className="panel section-space"><div className="section-heading"><h2>关联题目与评分</h2>{writable&&<Button icon={<PlusOutlined aria-hidden/>} onClick={()=>setQuestionEditor('new')}>添加题目</Button>}</div>{!source.questions?.length?<Blank description="尚未添加题目"/>:<Collapse items={source.questions.map(q=>({key:q.id,label:<span>{kindName(q.kind)} · {q.prompt}</span>,children:<><p>{q.explanation}</p>{Object.entries(q.options??{}).map(([k,v])=><p key={k}>{k}. {v}</p>)}{!!q.answer?.length&&<p><strong>审核答案：{q.answer.join('、')}</strong></p>}{q.rubric?.map((r,i)=><p key={i}>{String(r.label)}：{String(r.score)} 分</p>)}<p>提示已设 {q.hints.length} 级 · 满分 {q.max_score}</p>{writable&&<Button onClick={()=>setQuestionEditor(q)}>编辑题目</Button>}</>}))}/>}</div>}
     </section></div>
@@ -102,7 +102,7 @@ function SourcePage({versionId}:{versionId:string}) {
 }
 
 type QuestionForm={kind:'single'|'multiple'|'essay';prompt:string;optionA:string;optionB:string;optionC:string;optionD:string;answer:string[];explanation:string;hints:string[];rubric:{label:string;score:number}[];max_score:number};
-function QuestionEditor({versionId,question,close}:{versionId:string;question:QuestionItem|'new';close:()=>void}) {
+export function QuestionEditor({versionId,question,close,agentEdit=false}:{versionId:string;question:QuestionItem|'new';close:()=>void;agentEdit?:boolean}) {
   const [form]=Form.useForm<QuestionForm>();
   const kind=Form.useWatch('kind',form)??'single';
   const {run,busy}=useRun();
@@ -115,7 +115,7 @@ function QuestionEditor({versionId,question,close}:{versionId:string;question:Qu
       options:values.kind==='essay'?{}:Object.fromEntries(['A','B','C','D'].map(k=>[k,values[('option'+k) as keyof QuestionForm]]).filter(([,v])=>!!v)) as Record<string,string>,
       answer:values.kind==='essay'?[]:values.answer,explanation:values.explanation,hints:values.hints,
       rubric:values.kind==='essay'?values.rubric:[],max_score:values.max_score};
-    await run(async()=>{const result=await api(question==='new'?'/content/questions':'/content/questions/'+question.id,question==='new'?'POST':'PUT',body);close();return result},'题目已保存');
+    await run(async()=>{const result=await api(question==='new'?'/content/questions':(agentEdit?'/teaching/questions/':'/content/questions/')+question.id,question==='new'?'POST':'PUT',body);close();return result},agentEdit?'已保存新题目版本；旧作业继续使用原版':'题目已保存');
   }
   return <Modal title={question==='new'?'添加审核题目':'编辑题目与评分要点'} open onCancel={close} footer={null} width={780}><Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
     <div className="form-inline"><Form.Item name="kind" label="题型" rules={[{required:true}]}><Select disabled={question!=='new'} options={[{value:'single',label:'单选题'},{value:'multiple',label:'多选题'},{value:'essay',label:'分析题'}]} onChange={value=>form.setFieldsValue({answer:[],max_score:value==='essay'?10:value==='multiple'?4:2})}/></Form.Item><Form.Item name="max_score" label="满分" rules={[{required:true}]}><InputNumber min={1} max={100} precision={0}/></Form.Item></div>

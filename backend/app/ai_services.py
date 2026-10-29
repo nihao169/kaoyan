@@ -51,12 +51,15 @@ def configured():
 
 def evidence_access(db, ctx, version_id):
     try:
-        return version_access(db, ctx, version_id, published=True)
-    except HTTPException:
+        from .workflows import active_source
+        return active_source(db, ctx, version_id)
+    except HTTPException as exc:
+        if isinstance(exc.detail,dict) and exc.detail.get('code')=='SOURCE_NOT_ENABLED':
+            raise WorkflowError('SOURCE_NOT_ENABLED') from exc
         raise WorkflowError('CONTENT_UNAVAILABLE')
 
 
-def completion(messages, metrics):
+def completion(messages, metrics, max_tokens=4096):
     start = time.monotonic()
     metrics['calls'] = metrics.get('calls', 0) + 1
     try:
@@ -64,7 +67,7 @@ def completion(messages, metrics):
             response = client.post(settings.model_base_url.rstrip('/') + '/chat/completions',
                 headers={'Authorization': 'Bearer ' + settings.model_api_key},
                 json={'model': settings.model_name, 'thinking': {'type': 'disabled'}, 'temperature': 0.2,
-                      'max_tokens': 4096, 'response_format': {'type': 'json_object'}, 'messages': messages})
+                      'max_tokens': max_tokens, 'response_format': {'type': 'json_object'}, 'messages': messages})
         if response.status_code in (408, 429) or response.status_code >= 500:
             raise WorkflowError('MODEL_RATE_LIMIT' if response.status_code == 429 else 'MODEL_TEMPORARY_ERROR', True)
         if response.status_code in (401, 403):
@@ -140,7 +143,7 @@ def process_request(request_id):
             knowledge, version_id = run.knowledge_id, None
         # Materialize only authorized evidence; close the transaction before network calls.
         try:
-            evidence = hybrid(db, ctx, data.get('question') or data.get('prompt') or '知识点 教学方法 适用条件', knowledge, version_id)
+            evidence = hybrid(db, ctx, data.get('question') or data.get('prompt') or '知识点 教学方法 适用条件', knowledge, version_id, enabled_only=True)
             evidence = expand_context(db, ctx, evidence)
         except SearchUnavailable as exc:
             raise WorkflowError(str(exc))

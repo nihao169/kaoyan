@@ -1,4 +1,4 @@
-"""Original, deliberately small teaching dataset. Nothing is auto-published."""
+"""Initialize accounts/configuration; legacy teaching fixtures require explicit test opt-in."""
 import hashlib
 from sqlalchemy import select
 from . import models as m
@@ -90,10 +90,11 @@ DATA = [
 ]
 
 
-def seed():
+def seed(include_demo_content=False):
     with SessionLocal.begin() as db:
         if db.scalar(select(m.Organization.id)):
-            augment(db)
+            if include_demo_content:
+                augment(db)
             return False
         org = m.Organization(name='知行研学 · 演示机构', is_demo=True)
         db.add(org)
@@ -127,6 +128,8 @@ def seed():
             module = m.Module(subject_id=subject.id, name=item['module'], position=index)
             db.add(module)
             db.flush()
+            if not include_demo_content:
+                continue
             kp = m.KnowledgePoint(module_id=module.id, name=item['topic'])
             db.add(kp)
             db.flush()
@@ -156,7 +159,8 @@ def seed():
         db.flush()
         db.add(m.CurriculumVersion(curriculum_id=curriculum.id, applicable_year=2027, knowledge_ids=knowledge_ids))
         db.flush()
-        augment(db)
+        if include_demo_content:
+            augment(db)
         return True
 
 
@@ -208,4 +212,4 @@ def augment(db):
 
 
 if __name__ == '__main__':
-    print('已初始化演示机构；教学内容均为草稿，请教师审核发布。' if seed() else '已存在数据，未重复初始化。')
+    print('已初始化账号与政治教学配置，未导入资料或题目。' if seed() else '已存在数据，未导入演示内容。')

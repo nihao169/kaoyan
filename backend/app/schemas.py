@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
 
 class Input(BaseModel):
@@ -10,6 +10,11 @@ class LoginInput(Input):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=200)
     org_id: str | None = None
+
+    @field_validator('username', mode='before')
+    @classmethod
+    def trim_username(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class GoalInput(Input):
@@ -55,8 +60,8 @@ class ResolveInput(EvaluationInput):
 
 class SourceInput(Input):
     title: str = Field(min_length=1, max_length=200)
-    text: str = Field(min_length=1, max_length=500000)
-    knowledge_id: str
+    text: str = Field(min_length=1, max_length=52428800)
+    knowledge_id: str | None = None
     rights: str = Field(min_length=1, max_length=2000)
     visibility: Literal['organization', 'private', 'class'] = 'organization'
     class_id: str | None = None
@@ -190,6 +195,9 @@ class AttemptOutput(BaseModel):
     sources: list[EvidenceOutput] | None = None
     revisions: list[dict] | None = None
     events: list[dict] | None = None
+    grading_state: str = '未提交'
+    ai_suggestion: dict | None = None
+    group_url: str | None = None
 
 
 class TaskOutput(BaseModel):
@@ -292,6 +300,7 @@ class HistoryOutput(BaseModel):
     created_at: str
     task: TaskOutput
     evaluation: EvaluationOutput | None
+    grading_state: str = '历史记录'
 
 
 class SourceListItemOutput(BaseModel):
@@ -305,6 +314,8 @@ class SourceListItemOutput(BaseModel):
     rights: str
     visibility: str
     source_id: str
+    enabled: bool = False
+    generation_state: str | None = None
 
 
 class SourceListOutput(BaseModel):
@@ -387,6 +398,8 @@ class TeacherAttemptOutput(BaseModel):
     kind: str
     prompt: str
     evaluation: EvaluationOutput | None
+    grading_state: str = '未提交'
+    ai_suggestion: dict | None = None
 
 
 class ReviewCaseOutput(BaseModel):

@@ -5,10 +5,11 @@ import { App as AntApp, Avatar, Button, Form, Input, Tag, Tooltip } from 'antd';
 import { BookOutlined, CalendarOutlined, CheckSquareOutlined, EditOutlined, FileTextOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, ReadOutlined, TeamOutlined, UserOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { api, setCsrf, type User } from './api';
 import { State } from './ui';
-import { Home, Goals, Diagnostic, Study, Mistakes, Reviews, History } from './student';
+import { Goals, Study, Reviews, History } from './student';
 import { Teacher, TeacherAttempt, Cases, AdminUsers } from './teacher';
 import { ContentList, SourceView } from './content';
 import { AISettings, KnowledgeStatus, Referrals, Lessons } from './extensions';
+import { StudentAssignments, TeacherAssignments, AssignmentWork, MistakeDiagnoses } from './workflows';
 
 const Auth = createContext<User | null>(null);
 export function useUser() { return useContext(Auth)!; }
@@ -21,7 +22,7 @@ function Login() {
   async function login(values:{username:string;password:string}) {
     setBusy(true);
     try {
-      await api('/auth/login','POST',values);
+      await api('/auth/login','POST',{...values,username:values.username.trim()});
       const user = await api<User>('/me');
       setCsrf(user.csrf_token);
       client.removeQueries({predicate:q=>q.queryKey[0]!=='me'});
@@ -41,7 +42,7 @@ function Login() {
       <Form.Item name="password" label="密码" rules={[{required:true,message:'请输入密码'}]}><Input.Password size="large" autoComplete="current-password" placeholder="请输入密码"/></Form.Item>
       <Button type="primary" block size="large" htmlType="submit" loading={busy}>进入工作台 <ArrowRightOutlined aria-hidden/></Button>
     </Form>
-    <div className="demo-accounts"><strong>本地演示账号</strong><p>学生 student　教师 teacher　管理员 admin</p><p>统一密码：<code>Zhixing2026!</code></p><small>示例内容需教师审核发布后才能开始学习。</small></div>
+    <div className="demo-accounts"><strong>本地演示账号</strong><p>学生 student　教师 teacher　管理员 admin</p><p>统一密码：<code>Zhixing2026!</code></p><small>教师上传原文、启用生成题目后，可向班级布置作业。</small></div>
   </div></div></div>;
 }
 
@@ -61,9 +62,9 @@ function Shell({user}:{user:User}) {
   const client = useQueryClient();
   const {message}=AntApp.useApp();
   const links = user.roles.includes('student') ? [
-    ['/',<HomeOutlined aria-hidden/>,'学习首页'],['/goals',<CalendarOutlined aria-hidden/>,'目标与安排'],['/diagnostic',<CheckSquareOutlined aria-hidden/>,'基础诊断'],['/knowledge',<BookOutlined aria-hidden/>,'知识点诊断'],['/mistakes',<EditOutlined aria-hidden/>,'错题与补学'],['/reviews',<ReadOutlined aria-hidden/>,'复习计划'],['/history',<FileTextOutlined aria-hidden/>,'学习记录'],['/help',<TeamOutlined aria-hidden/>,'教师帮助'],
+    ['/',<HomeOutlined aria-hidden/>,'我的作业'],['/mistakes',<EditOutlined aria-hidden/>,'错题诊断'],['/reviews',<ReadOutlined aria-hidden/>,'复习计划'],['/history',<FileTextOutlined aria-hidden/>,'学习记录'],['/knowledge',<BookOutlined aria-hidden/>,'知识点证据'],['/goals',<CalendarOutlined aria-hidden/>,'学习目标（可选）'],['/help',<TeamOutlined aria-hidden/>,'教师帮助'],
   ] : [
-    ...(user.roles.includes('teacher')? [['/',<HomeOutlined aria-hidden/>,'教学概览'],['/teacher',<TeamOutlined aria-hidden/>,'班级与作答'],['/cases',<CheckSquareOutlined aria-hidden/>,'评价复核'],['/help',<TeamOutlined aria-hidden/>,'学习困难转办'],['/lessons',<BookOutlined aria-hidden/>,'AI 备课']]:[]),
+    ...(user.roles.includes('teacher')? [['/',<HomeOutlined aria-hidden/>,'教学概览'],['/assignments',<CheckSquareOutlined aria-hidden/>,'作业与批阅'],['/teacher',<TeamOutlined aria-hidden/>,'班级与作答'],['/cases',<CheckSquareOutlined aria-hidden/>,'评价复核'],['/help',<TeamOutlined aria-hidden/>,'学习困难转办'],['/lessons',<BookOutlined aria-hidden/>,'AI 备课']]:[]),
     ['/content',<BookOutlined aria-hidden/>,'教学内容'],...(user.roles.includes('admin')?[['/users',<UserOutlined aria-hidden/>,'账号管理'],['/ai-settings',<BookOutlined aria-hidden/>,'AI 服务状态']]:[]),
   ];
   async function logout() {
@@ -83,15 +84,18 @@ function Shell({user}:{user:User}) {
     </aside>
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><Button className="mobile-toggle" type="text" icon={<MenuOutlined aria-hidden/>} onClick={()=>setMenu(!menu)} aria-label="展开菜单"/><span>知行研学 <span className="topbar-separator">/</span> {user.roles.includes('student')?'学习工作台':'教学工作台'}</span></div><div className="topbar-right"><span className="date-label">{new Date().toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',month:'long',day:'numeric',weekday:'long'})}</span><Tag>演示机构</Tag><Avatar size="small" style={{background:'#28594b'}}>{user.name.slice(0,1)}</Avatar></div></header>
       <main className="page-content"><Routes>
-        <Route path="/" element={user.roles.includes('student')?<Home/>:user.roles.includes('teacher')?<Teacher/>:<Navigate to="/content" replace/>}/>
+        <Route path="/" element={user.roles.includes('student')?<StudentAssignments/>:user.roles.includes('teacher')?<Teacher/>:<Navigate to="/content" replace/>}/>
+        <Route path="/assignments" element={user.roles.includes('teacher')?<TeacherAssignments/>:<Navigate to="/" replace/>}/>
+        <Route path="/assignments/:groupId" element={<Role role="student"><AssignmentWork/></Role>}/>
+        <Route path="/practice/:groupId" element={<Role role="student"><AssignmentWork practice/></Role>}/>
         <Route path="/goals" element={<Role role="student"><Goals/></Role>}/>
         <Route path="/knowledge" element={<Role role="student"><KnowledgeStatus/></Role>}/>
         <Route path="/help" element={<Referrals teacher={user.roles.includes('teacher')}/>}/>
         <Route path="/lessons" element={<Role role="teacher"><Lessons/></Role>}/>
         <Route path="/ai-settings" element={<Role role="admin"><AISettings/></Role>}/>
-        <Route path="/diagnostic" element={<Role role="student"><Diagnostic/></Role>}/>
+        <Route path="/diagnostic" element={<Navigate to="/mistakes" replace/>}/>
         <Route path="/study/:taskId" element={<Role role="student"><Study/></Role>}/>
-        <Route path="/mistakes" element={<Role role="student"><Mistakes/></Role>}/>
+        <Route path="/mistakes" element={<Role role="student"><MistakeDiagnoses/></Role>}/>
         <Route path="/reviews" element={<Role role="student"><Reviews/></Role>}/>
         <Route path="/history" element={<Role role="student"><History/></Role>}/>
         <Route path="/teacher" element={<Role role="teacher"><Teacher/></Role>}/>

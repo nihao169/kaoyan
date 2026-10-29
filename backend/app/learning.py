@@ -49,7 +49,7 @@ def attempt_view(db, ctx, a, teacher=False):
     q = db.get(m.QuestionVersion, a.question_version_id)
     version, _ = version_access(db, ctx, q.source_version_id)
     diagnostic = db.get(m.DiagnosticSession, task.diagnostic_id) if task.diagnostic_id else None
-    reveal = teacher or (a.status != 'draft' and (not diagnostic or diagnostic.status == 'completed'))
+    reveal = teacher or (a.status != 'draft' and (not diagnostic or diagnostic.status in ('completed','archived')))
     remediation = db.scalar(select(m.Remediation).where(m.Remediation.attempt_id == a.id))
     result = {'id': a.id, 'status': a.status, 'task_id': task.id, 'mode': task.mode, 'reason': task.reason,
               'answer': a.answer, 'response_text': a.response_text, 'process': a.process,
@@ -57,6 +57,9 @@ def attempt_view(db, ctx, a, teacher=False):
               'question': question_view(q, reveal), 'evaluation': current_evaluation(db, a.id) if reveal else None,
               'content_status': version.status, 'remediation_id': remediation.id if remediation else None,
               'submitted_at': a.submitted_at}
+    from .workflows import grading_view, task_group_url
+    result.update(grading_view(db, a))
+    result['group_url'] = task_group_url(db, task.id)
     if reveal:
         result['sources'] = retrieve(db, ctx, knowledge_id=q.knowledge_id, version_id=q.source_version_id)
     return result
@@ -99,8 +102,11 @@ def save_draft(db, ctx, attempt_id, data):
     return a
 
 
-def submit_attempt(db, ctx, attempt_id):
+def submit_attempt(db, ctx, attempt_id, group_submit=False):
     a = owned_attempt(db, ctx, attempt_id)
+    if not group_submit and (db.scalar(select(m.AssignmentTask.id).where(m.AssignmentTask.task_id == a.task_id)) or
+                             db.scalar(select(m.PracticeTask.id).where(m.PracticeTask.task_id == a.task_id))):
+        fail(409, 'GROUP_SUBMISSION_REQUIRED', '请返回作业页面统一提交整组答案')
     if a.status != 'draft':
         return a
     task, q = owned_task(db, ctx, a.task_id)
@@ -342,6 +348,9 @@ def score_essay(db, ctx, attempt_id, data, case=None):
         number = 1
     db.add(m.EvaluationRevision(evaluation_id=ev.id, number=number, score=sum(data.parts), parts=data.parts, feedback=data.feedback, evaluator_id=ctx.user.id, method='teacher'))
     a.status = 'graded'
+    suggestion = db.scalar(select(m.EvaluationSuggestion).where(m.EvaluationSuggestion.attempt_id == a.id))
+    if suggestion:
+        suggestion.confirmed = True
     db.get(m.LearningTask, a.task_id).state = 'completed'
     if case:
         case.status = 'resolved'

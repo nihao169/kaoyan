@@ -12,17 +12,19 @@ type TeacherAttemptItem = Contracts['TeacherAttemptOutput'];
 type Case = Contracts['ReviewCaseOutput'];
 
 export function Teacher() {
+  const [search]=useSearchParams();
+  const assignment=search.get('assignment');
   const overview=useQuery({queryKey:['teacher-overview'],queryFn:()=>api<Student[]>('/teacher/overview')});
-  const attempts=useQuery({queryKey:['teacher-attempts'],queryFn:()=>api<TeacherAttemptItem[]>('/teacher/attempts')});
+  const attempts=useQuery({queryKey:['teacher-attempts',assignment],queryFn:()=>api<TeacherAttemptItem[]>('/teacher/attempts'+(assignment?'?assignment_id='+assignment:'')),refetchInterval:q=>q.state.data?.some(a=>a.grading_state==='AI初评中')?3000:false});
   const [pendingOnly,setPendingOnly]=useState(false);
   const pending=attempts.data?.filter(a=>a.status==='pending_teacher').length??0;
-  return <><PageTitle title="教学概览" description="从真实学习证据出发，理解学生的思考并提供有针对性的反馈。" action={<Link to="/content"><Button type="primary">管理教学内容</Button></Link>}/>
+  return <><PageTitle title={assignment?'作业作答与批阅':'教学概览'} description="系统判分、AI建议与教师确认分别记录，教师只确认分析题或处理异议。" action={<Link to="/assignments"><Button type="primary">布置作业与批阅</Button></Link>}/>
     <div className="stat-grid"><Card><Statistic title="授权班级学生" value={overview.data?.length??0} suffix="人" prefix={<TeamOutlined aria-hidden/>}/><p>仅展示你有权限查看的学生</p></Card><Card><Statistic title="已提交作答" value={attempts.data?.length??0} suffix="次" prefix={<FileTextOutlined aria-hidden/>}/><p>保留原始答案与思考过程</p></Card><Card><Statistic title="分析题待评" value={pending} suffix="份" prefix={<CheckSquareOutlined aria-hidden/>}/><p>人工评分后进入正式成绩</p></Card></div>
     <section className="panel"><div className="section-heading"><div><h2>班级学情</h2><p>得分为已评价作答累计，包含练习和复习，不是考试预测分数。</p></div></div><State query={overview}><Table rowKey="id" pagination={false} dataSource={overview.data??[]} scroll={{x:600}} columns={[
       {title:'学生',dataIndex:'name'},{title:'已提交作答',dataIndex:'attempts'},{title:'待评分析题',dataIndex:'pending',render:v=><Tag color={v?'gold':'default'}>{v} 份</Tag>},{title:'已评价累计得分',render:(_,s)=>`${s.score} / ${s.max_score}`},
     ]}/></State></section>
     <section className="panel section-space"><div className="section-heading"><div><h2>学生作答</h2><p>进入详情可查看思路、提示使用、内容版本和评分历史。</p></div><Button type={pendingOnly?'primary':'default'} onClick={()=>setPendingOnly(!pendingOnly)}>{pendingOnly?'显示全部':'只看待评'}</Button></div><State query={attempts}><Table rowKey="id" dataSource={(attempts.data??[]).filter(a=>!pendingOnly||a.status==='pending_teacher')} pagination={{pageSize:8}} scroll={{x:800}} columns={[
-      {title:'学生',dataIndex:'student',width:100},{title:'题目',render:(_,a)=><Link to={'/teacher/attempts/'+a.id}>{a.prompt}</Link>},{title:'题型',dataIndex:'kind',render:kindName,width:90},{title:'状态',dataIndex:'status',render:v=><Status value={v}/>,width:110},{title:'得分',render:(_,a)=>a.evaluation?.score??'待评',width:70},{title:'提交时间',dataIndex:'submitted_at',render:date,width:140},
+      {title:'学生',dataIndex:'student',width:100},{title:'题目',render:(_,a)=><Link to={'/teacher/attempts/'+a.id}>{a.prompt}</Link>},{title:'题型',dataIndex:'kind',render:kindName,width:90},{title:'评价状态',dataIndex:'grading_state',render:v=><Tag>{v}</Tag>,width:160},{title:'正式分',render:(_,a)=>a.evaluation?.score??'尚未确认',width:90},{title:'操作',render:(_,a)=><Link to={'/teacher/attempts/'+a.id}><Button type={a.status==='pending_teacher'?'primary':'default'}>{a.status==='pending_teacher'?'确认评分':'查看作答'}</Button></Link>,width:130},{title:'提交时间',dataIndex:'submitted_at',render:date,width:140},
     ]}/></State></section>
   </>;
 }
@@ -32,11 +34,11 @@ export function TeacherAttempt() {
   const [search]=useSearchParams();
   const caseId=search.get('case');
   const navigate=useNavigate();
-  const query=useQuery({queryKey:['teacher-attempt',attemptId],queryFn:()=>api<Attempt>('/teacher/attempts/'+attemptId)});
+  const query=useQuery({queryKey:['teacher-attempt',attemptId],queryFn:()=>api<Attempt>('/teacher/attempts/'+attemptId),refetchInterval:q=>q.state.data?.grading_state==='AI初评中'?3000:false});
   const {busy,run}=useRun();
   const [form]=Form.useForm();
   const a=query.data;
-  useEffect(()=>{if (a) form.setFieldsValue({parts:a.question.kind==='essay'?a.question.rubric?.map((_,i)=>a.evaluation?.parts[i]??0):[a.evaluation?.score??0],feedback:''})},[a,form]);
+  useEffect(()=>{if (a) form.setFieldsValue({parts:a.question.kind==='essay'?a.question.rubric?.map((_,i)=>a.evaluation?.parts[i]??a.ai_suggestion?.parts?.[i]??0):[a.evaluation?.score??0],feedback:a.evaluation?'':a.ai_suggestion?.feedback??''})},[a,form]);
   async function grade(values:{parts:number[];feedback:string}) {
     if(!a)return;
     const body={...values,expected_revision:a.evaluation?.revision??0};
@@ -44,12 +46,15 @@ export function TeacherAttempt() {
     if(result&&caseId) navigate('/cases');
   }
   return <><PageTitle title={caseId?'评价复核':'作答与评价详情'} description="原始作答保持不变；新的评分或复核会形成独立的评价修订。" action={<Link to={caseId?'/cases':'/teacher'}><Button>返回列表</Button></Link>}/><State query={query}>{a&&<>
-    <TeacherLearningChain attemptId={a.id}/><div className="study-layout"><section className="panel question-panel"><div className="question-meta"><Tag color="green">{kindName(a.question.kind)}</Tag><Status value={a.status}/><span>题目版本 {a.question.number}</span><span>使用 {a.hint_level} 级提示</span></div><h2 className="question-prompt">{a.question.prompt}</h2>
+    <TeacherLearningChain attemptId={a.id}/><div className="study-layout"><section className="panel question-panel"><div className="question-meta"><Tag color="green">{kindName(a.question.kind)}</Tag><Tag>{a.grading_state}</Tag><span>题目版本 {a.question.number}</span><span>使用 {a.hint_level} 级提示</span></div><h2 className="question-prompt">{a.question.prompt}</h2>
       {Object.entries(a.question.options).map(([k,v])=><p className="teacher-option" key={k}><strong>{k}</strong> {v}</p>)}
       <div className="analysis-box"><h3>学生原始答案</h3><p className="preserve-text">{a.question.kind==='essay'?a.response_text:a.answer.join('、')}</p><h3>原始思考过程</h3><p className="preserve-text">{a.process||'未填写思考过程'}</p><span className="muted">用时 {a.duration_seconds} 秒 · {a.hint_level?'辅助作答':'未使用提示'}</span></div>
       <div className="analysis-box"><h3>审核解析与评分依据</h3><p>{a.question.explanation}</p>{!!a.question.answer?.length&&<p>审核答案：{a.question.answer.join('、')}</p>}</div>
       {a.evaluation&&<Alert type="info" showIcon message={`当前有效评价：${a.evaluation.score} / ${a.question.max_score} 分 · 第 ${a.evaluation.revision} 次评价`} description={a.evaluation.feedback}/>}
-    </section><aside className="panel"><h2>{caseId?'填写复核评价':a.evaluation?'修订教师评价':'分析题评分'}</h2>{a.question.kind==='essay'||caseId?<Form form={form} layout="vertical" onFinish={grade} requiredMark={false}>
+    </section><aside className="panel"><h2>{caseId?'填写复核评价':a.evaluation?'修订教师评价':'分析题评分'}</h2>
+      {a.ai_suggestion?.parts&&<><Alert type="info" message={`AI建议分：${a.ai_suggestion.score} / ${a.question.max_score}，${a.ai_suggestion.confirmed?'已确认':'尚未计入正式成绩'}`} description={a.ai_suggestion.feedback}/>{!a.evaluation&&!caseId&&<Button className="section-space" type="primary" block loading={busy} onClick={()=>run(()=>api('/teacher/attempts/'+a.id+'/confirm-ai-evaluation','POST',{},key()),'AI初评已由教师确认为正式成绩')}>确认AI初评</Button>}<Collapse className="section-space" items={[{key:'ai-sources',label:'核对AI初评依据',children:<Sources items={a.ai_suggestion.sources??[]}/>}]}/></>}
+      {a.grading_state==='AI初评中'&&<p>Agent 正在按评分要点初评，稍后可确认；也可直接手工评分。</p>}
+      {a.question.kind==='essay'||caseId?<Form form={form} layout="vertical" onFinish={grade} requiredMark={false}>
       {(a.question.kind==='essay'?a.question.rubric??[]:[{label:'复核得分',score:a.question.max_score}]).map((r,i)=><Form.Item key={i} name={['parts',i]} label={`${r.label}（满分 ${r.score}）`} rules={[{required:true,message:'请填写得分'}]}><InputNumber min={0} max={r.score} precision={0} style={{width:'100%'}}/></Form.Item>)}
       <Form.Item name="feedback" label={caseId?'复核说明与修改原因':'评语与依据'} rules={[{required:true,message:'请填写评价说明'}]}><Input.TextArea rows={5} maxLength={5000}/></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block>{caseId?'保存复核结果':'保存正式评分'}</Button><p className="small-note">分项总和自动计算；提交时核对当前评价版本，避免覆盖其他教师的修改。</p>

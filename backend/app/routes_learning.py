@@ -9,6 +9,7 @@ from .content import retrieve, version_access, available_questions
 from .db import get_db
 from .errors import fail, require
 from .api_common import entity, idempotent, no_active_diagnostic, EnvelopeRoute
+from .workflows import grading_view
 
 router = APIRouter(route_class=EnvelopeRoute)
 
@@ -235,5 +236,6 @@ def appeal(evaluation_id: str, data: s.ReasonInput, ctx=Depends(student_context)
 def history(ctx=Depends(student_context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
     return [{'id': a.id, 'status': a.status, 'created_at': a.created_at, 'task': l.task_view(db, db.get(m.LearningTask, a.task_id)),
-             'evaluation': l.current_evaluation(db, a.id) if not db.get(m.LearningTask, a.task_id).diagnostic_id or db.get(m.DiagnosticSession, db.get(m.LearningTask, a.task_id).diagnostic_id).status == 'completed' else None}
+             'evaluation': l.current_evaluation(db, a.id) if not db.get(m.LearningTask, a.task_id).diagnostic_id or db.get(m.DiagnosticSession, db.get(m.LearningTask, a.task_id).diagnostic_id).status in ('completed','archived') else None,
+             'grading_state': grading_view(db,a)['grading_state']}
             for a in db.scalars(select(m.Attempt).where(m.Attempt.membership_id == ctx.membership.id).order_by(m.Attempt.created_at.desc()))]

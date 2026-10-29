@@ -18,6 +18,9 @@ foreach ($port in @(5173,8000)) {
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 $env:PYTHONPATH = Join-Path $projectRoot 'backend'
 $env:PYTHONUTF8 = '1'
+if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+    $env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY', 'User')
+}
 $services = @()
 $startedAt = [DateTime]::UtcNow.ToString('o')
 try {
@@ -30,7 +33,12 @@ try {
     $services += @{name='frontend';pid=$frontProcess.Id}
     @{root=$projectRoot;started_at=$startedAt;services=$services} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
     $ready = $false
-    for ($i=0; $i -lt 30; $i++) {
+    # Local embedding-model cold starts can exceed the old ~30 second window.
+    $readyDeadline = [DateTime]::UtcNow.AddSeconds(180)
+    while ([DateTime]::UtcNow -lt $readyDeadline) {
+        foreach ($entry in $services) {
+            if (-not (Get-Process -Id $entry.pid -ErrorAction SilentlyContinue)) { throw ('Service exited during startup: ' + $entry.name) }
+        }
         try {
             $apiReady = Invoke-RestMethod 'http://127.0.0.1:8000/health/ready' -TimeoutSec 1
             $frontReady = Invoke-WebRequest 'http://127.0.0.1:5173' -UseBasicParsing -TimeoutSec 1

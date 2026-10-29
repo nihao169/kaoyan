@@ -18,11 +18,25 @@ sys.path.insert(0, str(root / 'backend'))
 from alembic.config import Config
 from alembic import command
 from app.seed import seed
+from app.config import settings
+if os.environ.get('ZX_REAL_AI') != '1':
+    # Empty environment values are intentionally ignored in production settings.
+    # Explicitly disable real provider access in ordinary isolated browser tests.
+    settings.model_api_key = ''
 from app.main import app
 import uvicorn
 
 command.upgrade(Config(str(root / 'backend/alembic.ini')), 'head')
-seed()
+seed(include_demo_content=os.environ.get('ZX_TEACHING_FLOW')!='1')
+if os.environ.get('ZX_TEACHING_TEST_PROVIDER') == '1':
+    if os.environ.get('ZX_REAL_AI') == '1':
+        raise RuntimeError('Controlled and real providers must never be combined')
+    sys.path.insert(0,str(root / 'backend/tests'))
+    from teaching_provider import create_provider
+    from app import ai_services
+    ai_services.completion = create_provider()
+    settings.model_api_key = 'explicit-controlled-browser-test-key'
+    settings.model_name = 'controlled-browser-provider'
 # Load the actual local model before advertising readiness, so browser timeouts
 # measure interactions rather than torch/model cold startup.
 from app.search import encode_segments
@@ -31,8 +45,9 @@ if os.environ.get('ZX_REAL_AI') == '1':
     from app.config import settings
     if not settings.model_api_key:
         raise RuntimeError('Real acceptance requires MODEL_API_KEY in server .env')
-    from attach_sample_pages import attach
-    attach()
+    if os.environ.get('ZX_TEACHING_FLOW') != '1':
+        from attach_sample_pages import attach
+        attach()
 import threading
 import logging
 logging.basicConfig(level=logging.WARNING)

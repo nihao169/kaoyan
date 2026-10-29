@@ -46,13 +46,13 @@ export function Goals() {
   const catalog=useQuery({queryKey:['catalog'],queryFn:()=>api<Catalog>('/catalog')});
   const goal=useQuery({queryKey:['goal'],queryFn:()=>api<GoalInput|null>('/goals/current')});
   useEffect(()=>{if (catalog.data) form.setFieldsValue(goal.data??{subject_id:catalog.data.subjects[0]?.id,exam_year:2027,target_score:75,daily_minutes:30})},[goal.data,catalog.data,form]);
-  return <><PageTitle title="目标与安排" description="目标用于安排学习节奏，随时可以根据自己的情况调整。"/><div className="form-columns"><Card title="我的学习目标"><State query={catalog}><Form form={form} layout="vertical" onFinish={async values=>{if(await run(()=>api('/goals/current','PUT',values),'学习目标已保存'))navigate('/diagnostic')}} requiredMark={false}>
+  return <><PageTitle title="目标与安排" description="目标用于安排学习节奏，随时可以根据自己的情况调整。"/><div className="form-columns"><Card title="我的学习目标"><State query={catalog}><Form form={form} layout="vertical" onFinish={async values=>{if(await run(()=>api('/goals/current','PUT',values),'学习目标已保存'))navigate('/')}} requiredMark={false}>
     <Form.Item name="subject_id" label="学习科目" rules={[{required:true}]}><Select options={catalog.data?.subjects.map(s=>({value:s.id,label:s.name}))}/></Form.Item>
     <Form.Item name="exam_year" label="考试年份" rules={[{required:true}]}><InputNumber min={2026} max={2100} style={{width:'100%'}}/></Form.Item>
     <Form.Item name="target_score" label="目标分数" rules={[{required:true}]}><InputNumber min={1} max={100} style={{width:'100%'}}/></Form.Item>
     <Form.Item name="daily_minutes" label="每日学习时间（分钟）" rules={[{required:true}]}><InputNumber min={5} max={480} style={{width:'100%'}}/></Form.Item>
-    <Button type="primary" htmlType="submit" loading={busy}>保存并前往诊断 <ArrowRightOutlined aria-hidden/></Button>
-  </Form></State></Card><div className="panel guide-block"><h2>计划如何生成？</h2><p>先通过代表性题目了解当前表现，再安排基础练习和材料分析。复习与补学会优先进入今日任务。</p><p>少量诊断只能提供有限线索，未覆盖的知识点保持“待诊断”，不会据此生成全科预测分数。</p><Alert type="info" showIcon message="建议先安排能持续完成的时间" description="一个可坚持的小计划，比过量的任务更容易形成稳定节奏。"/></div></div></>;
+    <Button type="primary" htmlType="submit" loading={busy}>保存学习目标 <ArrowRightOutlined aria-hidden/></Button>
+  </Form></State></Card><div className="panel guide-block"><h2>计划如何生成？</h2><p>学习以教师布置的作业为入口。设置目标是可选的，错题诊断在提交后由你手动发起。</p><p>少量诊断只能提供有限线索，未覆盖的知识点保持“待诊断”，不会据此生成全科预测分数。</p><Alert type="info" showIcon message="建议先安排能持续完成的时间" description="一个可坚持的小计划，比过量的任务更容易形成稳定节奏。"/></div></div></>;
 }
 
 export function Diagnostic() {
@@ -83,12 +83,15 @@ export function Study() {
   return <StudyTask key={taskId} taskId={taskId!}/>;
 }
 
-function StudyTask({taskId}:{taskId:string}) {
-  const query=useQuery({queryKey:['study',taskId],queryFn:()=>api<Attempt>('/tasks/'+taskId+'/attempts','POST'),refetchOnWindowFocus:false,staleTime:Infinity});
-  return <State query={query}>{query.data&&<AttemptEditor initial={query.data} onReload={()=>query.refetch()}/>}</State>;
+export function StudyTask({taskId,registerSave}:{taskId:string;registerSave?:(fn:(()=>Promise<unknown>)|null)=>void}) {
+  const query=useQuery({queryKey:['study',taskId],queryFn:()=>api<Attempt>('/tasks/'+taskId+'/attempts','POST'),refetchOnWindowFocus:false,staleTime:Infinity,refetchInterval:q=>q.state.data?.status==='pending_teacher'?3000:false});
+  return <State query={query}>{query.data&&<AttemptEditor initial={query.data} onReload={()=>query.refetch()} registerSave={registerSave}/>}</State>;
 }
 
-function AttemptEditor({initial,onReload}:{initial:Attempt;onReload:()=>unknown}) {
+function AttemptEditor({initial,onReload,registerSave}:{initial:Attempt;onReload:()=>unknown;registerSave?:(fn:(()=>Promise<unknown>)|null)=>void}) {
+  const navigate=useNavigate();
+  const hintPanel=useRef<HTMLElement|null>(null);
+  const analysisPanel=useRef<HTMLDivElement|null>(null);
   const [attempt,setAttempt]=useState(initial);
   const [answer,setAnswer]=useState(initial.answer);
   const [text,setText]=useState(initial.response_text);
@@ -158,6 +161,7 @@ function AttemptEditor({initial,onReload}:{initial:Attempt;onReload:()=>unknown}
     if(!matches(contentOf(saved),{answer:now.answer,response_text:now.text,process:now.process}))return saveLatest();
     return saved;
   },[initial.id,acceptAttempt]);
+  useEffect(()=>{registerSave?.(save);return()=>registerSave?.(null)},[save,registerSave]);
   useEffect(()=>{
     if(!dirty||attempt.status!=='draft'||busy||draftConflict)return;
     const timer=setTimeout(()=>{save().catch(()=>{})},1000);
@@ -185,18 +189,18 @@ function AttemptEditor({initial,onReload}:{initial:Attempt;onReload:()=>unknown}
       setDirty(false);acceptAttempt(submitted);await onReload();return submitted;
     },'作答已提交并保存');
   }
-  return <><PageTitle title={attempt.mode==='diagnostic'?'独立完成诊断':attempt.mode==='review'?'到期复习':attempt.mode==='verification'?'补学后的新题验证':'专注完成这道题'} description={attempt.reason} action={<Link to={attempt.mode==='diagnostic'?'/diagnostic':'/'}><Button>返回任务</Button></Link>}/>
+  return <><PageTitle title={attempt.mode==='diagnostic'?'历史诊断作答':attempt.mode==='review'?'到期复习':attempt.mode==='verification'?'补学后的新题验证':'专注完成这道题'} description={attempt.reason} action={<Button loading={busy} onClick={()=>run(async()=>{if(editable)await save();navigate(attempt.group_url??'/');})}>保存并返回{attempt.group_url?'题组':'任务'}</Button>}/>
     {draftConflict&&<Alert className="section-space" type="warning" showIcon message="草稿存在其他页面的修改" description="当前输入仍保留在本页，系统没有覆盖服务器内容。确认需要采用服务器记录后，再点击读取。" action={<Button onClick={loadServerDraft} loading={busy}>读取服务器草稿</Button>}/>}
-    <div className="study-layout"><section className="panel question-panel"><div className="question-meta"><Tag color="green">{kindName(q.kind)}</Tag><span>{q.max_score} 分</span><span>题目版本 {q.number}</span><Status value={attempt.status}/></div><h2 className="question-prompt">{q.prompt}</h2>
+    <div className="study-layout"><section className="panel question-panel"><div className="question-meta"><Tag color="green">{kindName(q.kind)}</Tag><span>{q.max_score} 分</span><span>题目版本 {q.number}</span><Tag>{attempt.grading_state??attempt.status}</Tag></div><h2 className="question-prompt">{q.prompt}</h2>
       {q.kind==='multiple'&&<p className="muted">多选题全部选对得分，多选、漏选、错选均不得分。</p>}
       {q.kind==='single'?<Radio.Group className="answer-options" value={answer[0]} disabled={!editable||busy} onChange={e=>{setAnswer([e.target.value]);setDirty(true)}}>{Object.entries(q.options).map(([label,value])=><Radio key={label} value={label}><span className="option-label">{label}</span>{value}</Radio>)}</Radio.Group>:q.kind==='multiple'?<div className="answer-options" role="group" aria-label="多选答案">{Object.entries(q.options).map(([label,value])=><Checkbox key={label} value={label} checked={answer.includes(label)} disabled={!editable||busy} onChange={e=>{const checked=e.target.checked;setAnswer(previous=>checked?[...previous.filter(v=>v!==label),label]:previous.filter(v=>v!==label));setDirty(true)}}><span className="option-label">{label}</span>{value}</Checkbox>)}</div>:<div className="essay-answer"><label>你的材料分析</label><Input.TextArea aria-label="你的材料分析" value={text} onChange={e=>{setText(e.target.value);setDirty(true)}} disabled={!editable||busy} rows={9} maxLength={20000} showCount placeholder="结合原理与材料，写下你的分析…"/></div>}
       <div className="process-area"><label>思考过程 <span>帮助你回看思路，也帮助教师理解你的判断</span></label><Input.TextArea aria-label="思考过程" value={process} onChange={e=>{setProcess(e.target.value);setDirty(true)}} rows={4} maxLength={10000} disabled={!editable||busy} placeholder="为什么这样选择？哪些地方还不确定？"/></div>
-      {editable?<div className="answer-footer"><span className={saveState.startsWith('保存失败')?'save-error':'muted'}>{saveState}</span><Space><Button aria-label="保存草稿" loading={busy} onClick={()=>run(save)}>保存草稿</Button><Button aria-label="提交作答" type="primary" loading={busy} onClick={submit}>提交作答</Button></Space></div>:<Alert type={attempt.status==='pending_teacher'?'info':'success'} showIcon message={attempt.status==='pending_teacher'?'分析题已提交，等待教师评分':'作答记录已保存'} description={attempt.mode==='diagnostic'&&!attempt.evaluation?'结束全部诊断后统一查看结果。':'原始答案与提示使用情况已记录，提交后不再覆盖。'}/>}
+      {editable?<div className="answer-footer"><span className={saveState.startsWith('保存失败')?'save-error':'muted'}>{saveState}</span><Space wrap>{attempt.mode!=='diagnostic'&&<Button onClick={()=>hintPanel.current?.scrollIntoView({block:'start',behavior:'smooth'})}>学习提示</Button>}<Button aria-label="保存草稿" loading={busy} onClick={()=>run(save)}>保存草稿</Button>{attempt.group_url?<Button type="primary" loading={busy} onClick={()=>run(async()=>{await save();navigate(attempt.group_url!);})}>保存并返回题组</Button>:<Button aria-label="提交作答" type="primary" loading={busy} onClick={submit}>提交作答</Button>}</Space></div>:<><Alert type={attempt.status==='pending_teacher'?'info':'success'} showIcon message={attempt.grading_state??'作答记录已保存'} description={attempt.mode==='diagnostic'&&!attempt.evaluation?'历史诊断记录。':'原始答案与提示使用情况已记录，提交后不再覆盖。'}/><Space wrap className="section-space"><Button onClick={()=>analysisPanel.current?.scrollIntoView({block:'start',behavior:'smooth'})}>查看解析</Button>{attempt.remediation_id&&<Link to={'/mistakes?attempt='+attempt.id}><Button type="primary">AI诊断</Button></Link>}</Space></>}
       {attempt.evaluation&&<div className="evaluation-box"><div className="section-heading"><h2>本次评价</h2><strong className="score">{attempt.evaluation.score}<small> / {q.max_score}</small></strong></div><p>{attempt.evaluation.feedback}</p><Tag>{attempt.evaluation.method==='teacher'?'教师评价':'规则评分'} · 第 {attempt.evaluation.revision} 次评价</Tag><Button type="link" onClick={()=>setAppeal(true)}>对评价有异议？</Button></div>}
-      {q.explanation&&<div className="analysis-box"><h3>审核解析</h3><p>{q.explanation}</p>{q.answer&&q.answer.length>0&&<p>正确选项：<strong>{q.answer.join('、')}</strong></p>}</div>}
-      {attempt.remediation_id&&<div className="page-actions"><Link to="/mistakes"><Button type="primary" icon={<ReadOutlined aria-hidden/>}>确认错因并开始补学</Button></Link></div>}
-    </section><aside className="study-aside"><Card title={attempt.mode==='diagnostic'?'诊断规则':'循序获得帮助'}>
-      {attempt.mode==='diagnostic'?<p className="muted">请独立完成。诊断期间不提供提示、解析和资料检索。</p>:<><p className="muted">先独立思考，再逐级使用提示。使用情况将计入学习记录。</p><div className="hint-levels">{['相关概念','突破口','分步引导','完整解析'].map((label,i)=><Button key={label} block disabled={!editable||i>attempt.hint_level} loading={busy} onClick={()=>run(async()=>{await save();const result=await api<{text:string;level:number;revision:number}>('/attempts/'+attempt.id+'/hints','POST',{level:i+1});setHint(result);const current=await api<Attempt>('/attempts/'+attempt.id);acceptAttempt(current);return result})}>{i+1}. {label}{i<attempt.hint_level?' · 已查看':''}</Button>)}</div>{hint&&<div className="hint-content"><Tag>审核教学内容</Tag><p>{hint.text}</p></div>}<p className="small-note">已使用 {attempt.hint_level} 级提示。有提示的正确作答与独立完成分别记录。</p></>}
+      {attempt.ai_suggestion?.parts&&<Alert className="section-space" type="info" message={`AI建议分：${attempt.ai_suggestion.score} / ${q.max_score}（${attempt.ai_suggestion.confirmed?'已由教师确认':'待教师确认，不计入正式成绩'}）`} description={attempt.ai_suggestion.feedback}/>}
+      {q.explanation&&<div className="analysis-box" ref={analysisPanel}><h3>解析与评分依据</h3><p>{q.explanation}</p>{q.answer&&q.answer.length>0&&<p>正确选项：<strong>{q.answer.join('、')}</strong></p>}</div>}
+    </section><aside className="study-aside" ref={hintPanel}><Card title={attempt.mode==='diagnostic'?'历史诊断规则':'学习提示'}>
+      {attempt.mode==='diagnostic'?<p className="muted">请独立完成。诊断期间不提供提示、解析和资料检索。</p>:<><p className="muted">先独立思考，再逐级使用提示。使用情况将计入学习记录。</p><div className="hint-levels">{['相关概念','突破口','分步引导','完整解析'].map((label,i)=><Button key={label} block disabled={!editable||i>attempt.hint_level} loading={busy} onClick={()=>run(async()=>{await save();const result=await api<{text:string;level:number;revision:number}>('/attempts/'+attempt.id+'/hints','POST',{level:i+1});setHint(result);const current=await api<Attempt>('/attempts/'+attempt.id);acceptAttempt(current);return result})}>{i+1}. {label}{i<attempt.hint_level?' · 已查看':''}</Button>)}</div>{hint&&<div className="hint-content"><Tag>来自本题资料的学习提示</Tag><p>{hint.text}</p></div>}<p className="small-note">已使用 {attempt.hint_level} 级提示。有提示的正确作答与独立完成分别记录。</p></>}
     </Card>{attempt.mode!=='diagnostic'&&<AILearning attemptId={attempt.id} draft={editable} essay={q.kind==='essay'} hintLevel={attempt.hint_level} beforeRun={async()=>{if(editable)await save()}} afterRun={onReload}/>}</aside></div>
     {attempt.sources&&<section className="panel section-space"><h2>资料依据</h2><Sources items={attempt.sources}/></section>}
     <Modal title="提出评价异议" okText="提交异议" open={appeal} onCancel={()=>setAppeal(false)} confirmLoading={busy} onOk={()=>run(async()=>{if(!appealText.trim())throw new Error('请填写异议说明');const result=await api('/evaluations/'+attempt.evaluation?.id+'/review-cases','POST',{reason:appealText});setAppeal(false);return result},'已提交教师复核')}><p>请说明你认为需要重新核对的部分，教师会保留原评价并给出复核意见。</p><Input.TextArea aria-label="异议说明" rows={4} value={appealText} onChange={e=>setAppealText(e.target.value)} maxLength={5000}/></Modal>
@@ -227,6 +231,6 @@ export function Reviews() {
 export function History() {
   const query=useQuery({queryKey:['history'],queryFn:()=>api<HistoryItem[]>('/attempt-history')});
   return <><PageTitle title="学习记录" description="原始答案、提示使用和评价结果都保存在每次作答中。"/><State query={query}><Table rowKey="id" dataSource={query.data??[]} pagination={{pageSize:10}} scroll={{x:800}} columns={[
-    {title:'题目',render:(_,r)=><Link to={'/study/'+r.task.id}>{r.task.prompt}</Link>},{title:'题型',render:(_,r)=>kindName(r.task.kind)},{title:'状态',dataIndex:'status',render:v=><Status value={v}/>},{title:'正式得分',render:(_,r)=>r.evaluation?r.evaluation.score:'—'},{title:'记录时间',dataIndex:'created_at',render:date},
+    {title:'题目',render:(_,r)=><Link to={'/study/'+r.task.id}>{r.task.prompt}</Link>},{title:'题型',render:(_,r)=>kindName(r.task.kind)},{title:'评价状态',dataIndex:'grading_state',render:v=><Tag>{v}</Tag>},{title:'正式得分',render:(_,r)=>r.evaluation?r.evaluation.score:'—'},{title:'记录时间',dataIndex:'created_at',render:date},
   ]}/></State></>;
 }

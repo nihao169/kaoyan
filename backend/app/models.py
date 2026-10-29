@@ -85,6 +85,7 @@ class KnowledgePoint(Entity, Base):
     __tablename__ = 'knowledge_points'
     module_id: Mapped[str] = mapped_column(ForeignKey('modules.id'))
     name: Mapped[str] = mapped_column(String(150))
+    org_id: Mapped[str | None] = mapped_column(ForeignKey('organizations.id'), nullable=True)
 
 
 class Prerequisite(Entity, Base):
@@ -407,3 +408,108 @@ class LessonDraft(Entity, Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
     body: Mapped[str] = mapped_column(Text)
     revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class SourceActivation(Entity, Base):
+    __tablename__ = 'source_activations'
+    version_id: Mapped[str] = mapped_column(ForeignKey('source_versions.id'), unique=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey('organizations.id'))
+    teacher_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+
+
+class SourceKnowledge(Entity, Base):
+    __tablename__ = 'source_knowledge'
+    __table_args__ = (UniqueConstraint('version_id', 'knowledge_id'),)
+    version_id: Mapped[str] = mapped_column(ForeignKey('source_versions.id'))
+    knowledge_id: Mapped[str] = mapped_column(ForeignKey('knowledge_points.id'))
+    section: Mapped[str] = mapped_column(String(250), default='')
+
+
+class AgentRun(Entity, Base):
+    __tablename__ = 'agent_runs'
+    __table_args__ = (UniqueConstraint('org_id', 'fingerprint'),)
+    org_id: Mapped[str] = mapped_column(ForeignKey('organizations.id'))
+    owner_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    purpose: Mapped[str] = mapped_column(String(30))
+    source_version_id: Mapped[str | None] = mapped_column(ForeignKey('source_versions.id'), nullable=True)
+    attempt_id: Mapped[str | None] = mapped_column(ForeignKey('attempts.id'), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(25), default='queued')
+    stage: Mapped[str] = mapped_column(String(100), default='等待处理')
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str] = mapped_column(String(100), default='')
+    model: Mapped[str] = mapped_column(String(150))
+    workflow_version: Mapped[str] = mapped_column(String(50), default='teaching-agent-v1')
+
+
+class GeneratedQuestion(Entity, Base):
+    __tablename__ = 'generated_questions'
+    question_version_id: Mapped[str] = mapped_column(ForeignKey('question_versions.id'), unique=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('agent_runs.id'))
+    owner_membership_id: Mapped[str | None] = mapped_column(ForeignKey('memberships.id'), nullable=True)
+    option_analysis: Mapped[dict] = mapped_column(JSON, default=dict)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ArtifactEvidence(Entity, Base):
+    __tablename__ = 'artifact_evidence'
+    run_id: Mapped[str] = mapped_column(ForeignKey('agent_runs.id'))
+    artifact_kind: Mapped[str] = mapped_column(String(20))
+    artifact_id: Mapped[str] = mapped_column(String(36), index=True)
+    chunk_id: Mapped[str] = mapped_column(ForeignKey('source_chunks.id'))
+    quote: Mapped[str] = mapped_column(Text)
+
+
+class Assignment(Entity, Base):
+    __tablename__ = 'assignments'
+    org_id: Mapped[str] = mapped_column(ForeignKey('organizations.id'))
+    teacher_membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    class_id: Mapped[str] = mapped_column(ForeignKey('classes.id'))
+    title: Mapped[str] = mapped_column(String(200))
+    due_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    question_ids: Mapped[list] = mapped_column(JSON)
+
+
+class AssignmentSubmission(Entity, Base):
+    __tablename__ = 'assignment_submissions'
+    __table_args__ = (UniqueConstraint('assignment_id', 'membership_id'),)
+    assignment_id: Mapped[str] = mapped_column(ForeignKey('assignments.id'))
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    state: Mapped[str] = mapped_column(String(25), default='draft')
+    submitted_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class AssignmentTask(Entity, Base):
+    __tablename__ = 'assignment_tasks'
+    __table_args__ = (UniqueConstraint('submission_id', 'position'),)
+    submission_id: Mapped[str] = mapped_column(ForeignKey('assignment_submissions.id'))
+    task_id: Mapped[str] = mapped_column(ForeignKey('learning_tasks.id'), unique=True)
+    position: Mapped[int] = mapped_column(Integer)
+
+
+class EvaluationSuggestion(Entity, Base):
+    __tablename__ = 'evaluation_suggestions'
+    attempt_id: Mapped[str] = mapped_column(ForeignKey('attempts.id'), unique=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey('agent_runs.id'), unique=True)
+    parts: Mapped[list] = mapped_column(JSON)
+    feedback: Mapped[str] = mapped_column(Text)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class TargetedPractice(Entity, Base):
+    __tablename__ = 'targeted_practices'
+    run_id: Mapped[str] = mapped_column(ForeignKey('agent_runs.id'), unique=True)
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    origin_attempt_id: Mapped[str] = mapped_column(ForeignKey('attempts.id'))
+    state: Mapped[str] = mapped_column(String(25), default='draft')
+
+
+class PracticeTask(Entity, Base):
+    __tablename__ = 'practice_tasks'
+    __table_args__ = (UniqueConstraint('practice_id', 'position'),)
+    practice_id: Mapped[str] = mapped_column(ForeignKey('targeted_practices.id'))
+    task_id: Mapped[str] = mapped_column(ForeignKey('learning_tasks.id'), unique=True)
+    position: Mapped[int] = mapped_column(Integer)

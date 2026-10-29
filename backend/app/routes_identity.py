@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from argon2.exceptions import VerificationError
 from . import models as m
 from . import schemas as s
@@ -65,7 +65,7 @@ def current_user(ctx=Depends(context)):
 def catalog(ctx=Depends(context), db=Depends(get_db)):
     subjects = [entity(x, 'id', 'name', 'code') for x in db.scalars(select(m.Subject))]
     modules = [entity(x, 'id', 'name', 'subject_id', 'position') for x in db.scalars(select(m.Module).order_by(m.Module.position))]
-    knowledge = [entity(x, 'id', 'name', 'module_id') for x in db.scalars(select(m.KnowledgePoint))]
+    knowledge = [entity(x, 'id', 'name', 'module_id') for x in db.scalars(select(m.KnowledgePoint).where(or_(m.KnowledgePoint.org_id == None, m.KnowledgePoint.org_id == ctx.org_id)))]
     return {'subjects': subjects, 'modules': modules, 'knowledge': knowledge}
 
 

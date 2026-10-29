@@ -11,6 +11,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     & npm run test:e2e
     if ($LASTEXITCODE -ne 0) { throw 'Browser tests failed.' }
-    & npx playwright test --config playwright.extensions.config.ts
-    if ($LASTEXITCODE -ne 0) { throw 'Document and AI-state browser tests failed.' }
+    & npm run test:api
+    if ($LASTEXITCODE -ne 0) { throw 'API client tests failed.' }
 } finally { Pop-Location }

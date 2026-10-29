@@ -28,8 +28,11 @@ def sources(page: int = 1, page_size: int = 20, ctx=Depends(editor), db=Depends(
     result = []
     for version, source in db.execute(select(m.SourceVersion, m.Source).join(m.Source).where(m.Source.org_id == ctx.org_id).order_by(m.Source.created_at, m.SourceVersion.number.desc())):
         if source_allowed(db, ctx, source):
+            latest_run=db.scalar(select(m.AgentRun).where(m.AgentRun.source_version_id==version.id,m.AgentRun.purpose=='content').order_by(m.AgentRun.created_at.desc()))
             result.append({**entity(version, 'id', 'number', 'status', 'revision', 'knowledge_id', 'review_note'),
-                           **entity(source, 'title', 'rights', 'visibility'), 'source_id': source.id})
+                           **entity(source, 'title', 'rights', 'visibility'), 'source_id': source.id,
+                           'enabled':bool(db.scalar(select(m.SourceActivation.id).where(m.SourceActivation.version_id==version.id))),
+                           'generation_state':latest_run.state if latest_run else None})
     return {'items': result[(page-1)*page_size:page*page_size], 'total': len(result), 'page': page, 'page_size': page_size}
 
 
@@ -40,13 +43,13 @@ def add_source(data: s.SourceInput, ctx=Depends(editor), db=Depends(get_db)):
 
 
 @router.post('/content/sources/upload', status_code=202)
-async def upload(knowledge_id: str = Form(...), rights: str = Form(...), file: UploadFile = File(...), ctx=Depends(editor), db=Depends(get_db)):
+async def upload(file: UploadFile = File(...), knowledge_id: str | None = Form(None), rights: str = Form('教师提供，限本机构教学使用'), ctx=Depends(editor), db=Depends(get_db)):
     filename = file.filename or ''
     if not filename.lower().endswith(('.md', '.txt', '.pdf', '.docx')):
         fail(422, 'FILE_TYPE', '仅接受 PDF、DOCX、Markdown 和 TXT 文件')
-    body = await file.read(5 * 1024 * 1024 + 1)
-    if len(body) > 5 * 1024 * 1024:
-        fail(413, 'FILE_TOO_LARGE', '文件不能超过 5 MB')
+    body = await file.read(50 * 1024 * 1024 + 1)
+    if len(body) > 50 * 1024 * 1024:
+        fail(413, 'FILE_TOO_LARGE', '文件不能超过 50 MB')
     if filename.lower().endswith(('.pdf', '.docx')):
         from .documents import store
         suffix = '.pdf' if filename.lower().endswith('.pdf') else '.docx'
@@ -67,8 +70,11 @@ async def upload(knowledge_id: str = Form(...), rights: str = Form(...), file: U
     try:
         data = s.SourceInput(title=filename[:200], text=text, knowledge_id=knowledge_id, rights=rights)
     except ValueError:
-        fail(422, 'FILE_CONTENT_INVALID', '资料正文不能为空且不超过50万字，授权说明不能为空')
+        fail(422, 'FILE_CONTENT_INVALID', '资料正文不能为空，文件不超过50MB，授权说明不能为空')
     version, job = c.create_source(db, ctx, data)
+    from .documents import store
+    # Preserve exact uploaded bytes, including UTF-8 BOM and original newlines.
+    version.file_key = store(body, '.md' if filename.lower().endswith('.md') else '.txt')
     return {'id': version.id, 'job_id': job.id}
 
 
@@ -89,7 +95,8 @@ def source_detail(version_id: str, ctx=Depends(context), db=Depends(get_db)):
         rule = db.scalar(select(m.CardRule).where(m.CardRule.card_id == item['id']))
         item['causes'] = rule.causes if rule else []
     if ctx.has('teacher') or ctx.has('admin'):
-        data['questions'] = [entity(x, 'id', 'question_id', 'number', 'kind', 'prompt', 'options', 'answer', 'explanation', 'hints', 'rubric', 'max_score', 'status', 'source_version_id') for x in db.scalars(select(m.QuestionVersion).where(m.QuestionVersion.source_version_id == version.id))]
+        private_ids = select(m.GeneratedQuestion.question_version_id).where(m.GeneratedQuestion.owner_membership_id != None)
+        data['questions'] = [entity(x, 'id', 'question_id', 'number', 'kind', 'prompt', 'options', 'answer', 'explanation', 'hints', 'rubric', 'max_score', 'status', 'source_version_id') for x in db.scalars(select(m.QuestionVersion).where(m.QuestionVersion.source_version_id == version.id, m.QuestionVersion.id.not_in(private_ids)))]
     if ctx.has('teacher'):
         affected = []
         for attempt in db.scalars(select(m.Attempt).join(m.QuestionVersion, m.Attempt.question_version_id == m.QuestionVersion.id).where(m.QuestionVersion.source_version_id == version.id)):

@@ -14,7 +14,7 @@ from app.main import app
 
 
 @pytest.fixture
-def environment(tmp_path, monkeypatch):
+def environment(tmp_path, monkeypatch, request):
     data = tmp_path / 'data'
     data.mkdir()
     url = f'sqlite:///{(data / "test.db").as_posix()}'
@@ -36,9 +36,27 @@ def environment(tmp_path, monkeypatch):
     cfg = Config(str(ROOT / 'backend/alembic.ini'))
     cfg.set_main_option('script_location', str(ROOT / 'backend/migrations'))
     command.upgrade(cfg, 'head')
-    seed()
+    seed(include_demo_content=getattr(request,'param',True))
     yield data
     engine.dispose()
+
+
+@pytest.fixture(scope='session')
+def document_fixture(tmp_path_factory):
+    """Disposable parser inputs, independent of user-facing teaching files."""
+    from docx import Document
+    import pymupdf as fitz
+    directory=tmp_path_factory.mktemp('parser-documents')
+    text='自动化解析测试专用。实践是认识的来源，也是检验认识真理性的唯一标准。分析材料需要核对具体条件和实际反馈。本段不预设题目、选项和评分结果。'
+    doc=Document()
+    doc.add_heading('解析测试文档',0)
+    doc.add_paragraph(text)
+    doc.save(directory/'sample.docx')
+    with fitz.open() as pdf:
+        page=pdf.new_page()
+        page.insert_textbox(fitz.Rect(72,72,520,400),text,fontname='china-s',fontsize=12)
+        pdf.save(directory/'sample.pdf')
+    return directory
 
 
 def login_client(username):

@@ -7,6 +7,7 @@ from .db import get_db
 from .errors import fail, require
 from . import learning as l
 from .api_common import entity, idempotent, EnvelopeRoute
+from .workflows import grading_view
 
 router = APIRouter(route_class=EnvelopeRoute)
 
@@ -31,15 +32,18 @@ def overview(ctx=Depends(teacher), db=Depends(get_db)):
 
 
 @router.get('/teacher/attempts', response_model=list[s.TeacherAttemptOutput])
-def attempts(ctx=Depends(teacher), db=Depends(get_db)):
+def attempts(assignment_id: str | None = None, ctx=Depends(teacher), db=Depends(get_db)):
     result = []
     for a in db.scalars(select(m.Attempt).where(m.Attempt.status != 'draft').order_by(m.Attempt.created_at.desc())):
+        if assignment_id and not db.scalar(select(m.AssignmentTask.id).join(m.AssignmentSubmission,m.AssignmentTask.submission_id==m.AssignmentSubmission.id).where(m.AssignmentTask.task_id==a.task_id,m.AssignmentSubmission.assignment_id==assignment_id)):
+            continue
         if not teacher_can_view(db, ctx, a.membership_id):
             continue
         member = db.get(m.Membership, a.membership_id)
         q = db.get(m.QuestionVersion, a.question_version_id)
         result.append({**entity(a, 'id', 'status', 'submitted_at', 'hint_level'), 'student': db.get(m.User, member.user_id).name,
-                       'kind': q.kind, 'prompt': q.prompt, 'evaluation': l.current_evaluation(db, a.id)})
+                       'kind': q.kind, 'prompt': q.prompt, 'evaluation': l.current_evaluation(db, a.id),
+                       **grading_view(db, a)})
     return result
 
 

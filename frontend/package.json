@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config playwright.teaching.config.ts",
+    "test:api": "node --experimental-transform-types --test tests/api-client.test.ts",
     "api:types": "openapi-typescript ../docs/openapi.json -o src/generated/api.d.ts"
   },
   "dependencies": {

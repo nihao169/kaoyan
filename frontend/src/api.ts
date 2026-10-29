@@ -8,7 +8,7 @@ export type Evaluation = components['schemas']['EvaluationOutput'];
 export type Question = components['schemas']['QuestionOutput'];
 export type Evidence = components['schemas']['EvidenceOutput'];
 export type Task = components['schemas']['TaskOutput'];
-export type Attempt = Omit<components['schemas']['AttemptOutput'],'revisions'|'events'> & {revisions?: {number:number;score:number;feedback:string;method:string}[]; events?: {kind:string;payload:Record<string,unknown>;created_at:string}[]};
+export type Attempt = Omit<components['schemas']['AttemptOutput'],'revisions'|'events'|'ai_suggestion'> & {ai_suggestion?:{parts?:number[];score?:number;feedback?:string;confirmed?:boolean;run_id?:string;sources?:Evidence[];state?:string;error_code?:string}|null;revisions?: {number:number;score:number;feedback:string;method:string}[]; events?: {kind:string;payload:Record<string,unknown>;created_at:string}[]};
 export type Catalog = components['schemas']['CatalogOutput'];
 export class ApiError extends Error { constructor(public code:string, message:string, public status:number) {super(message)} }
 let csrf = '';
@@ -18,10 +18,25 @@ export async function api<T>(path: string, method='GET', body?: unknown, key?:st
   if (body && !(body instanceof FormData)) headers['Content-Type']='application/json';
   if (method!=='GET') headers['X-CSRF-Token']=csrf;
   if (key) headers['Idempotency-Key']=key;
-  const response = await fetch('/api/v1'+path, {method,credentials:'same-origin',headers,
-    body: body instanceof FormData ? body : body===undefined ? undefined : JSON.stringify(body)});
-  const payload = await response.json();
-  if (!response.ok) throw new ApiError(payload.error?.code??'REQUEST_FAILED', payload.error?.message??'请求失败',response.status);
+  let response: Response;
+  try {
+    response = await fetch('/api/v1'+path, {method,credentials:'same-origin',headers,
+      body: body instanceof FormData ? body : body===undefined ? undefined : JSON.stringify(body)});
+  } catch {
+    throw new ApiError('NETWORK_ERROR','无法连接学习服务，请检查连接后重试。',0);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    const unavailable = response.status >= 500;
+    throw new ApiError(unavailable?'SERVICE_UNAVAILABLE':'INVALID_RESPONSE',
+      unavailable?'学习服务暂未就绪，请稍后点击重试。':'服务返回异常，请重试；若持续出现，请联系管理员。',response.status);
+  }
+  if (!response.ok) throw new ApiError(payload?.error?.code??'REQUEST_FAILED', payload?.error?.message??'请求失败，请重试。',response.status);
+  if (!payload || typeof payload!=='object' || !Object.hasOwn(payload,'data')) {
+    throw new ApiError('INVALID_RESPONSE','服务返回异常，请重试；若持续出现，请联系管理员。',response.status);
+  }
   return payload.data as T;
 }
 export const key = () => crypto.randomUUID();

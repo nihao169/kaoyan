@@ -7,10 +7,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Real AI acceptance requires a configured serve
 $env:ZX_REAL_AI='1'
 Push-Location frontend
 try {
-    & npx playwright test --config playwright.real.config.ts
+    & npx playwright test --config playwright.teaching.config.ts
     if ($LASTEXITCODE -ne 0) { throw 'Real AI acceptance failed. Do not push final delivery.' }
 } finally {
     Pop-Location
     Remove-Item Env:ZX_REAL_AI -ErrorAction SilentlyContinue
 }
-Write-Host 'Automated real-AI checks finished. Review explanations, citations, hint boundaries and .runtime/real-ai-acceptance.json before final delivery.'
+Write-Host 'Automated real-AI checks finished. Review questions, answers, citations and .runtime/real-teaching-acceptance.json before final delivery.'

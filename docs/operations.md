@@ -104,13 +104,15 @@ $env:PYTHONPATH='backend'
 
 新增 `source_documents`、`chunk_embeddings`、`card_rules`、`ai_requests`、`teaching_referrals`、`lesson_drafts`，使用增量迁移保留原账号和学习记录。SQLite 事务使用 BEGIN IMMEDIATE 避免后台任务与页面操作同时升级写锁造成 BUSY_SNAPSHOT；多人高并发仍需迁移 PostgreSQL。
 
-首次运行执行 `scripts/setup-document-converter.ps1`，仅将 LibreOffice 解压到 `.runtime/libreoffice`。DOCX 保留原件并转换固定版式 PDF，解析与核对成功前不可提交审核。扫描页、加密或无文本文件会明确失败；不提供 OCR。修订原件须在新版本草稿中上传，禁止改写提取文字后保留不一致的原页。
+首次运行执行 `scripts/setup-document-converter.ps1`，仅将 LibreOffice 解压到 `.runtime/libreoffice`。DOCX 保留原件并转换固定版式 PDF，解析与索引成功后一次“启用并生成”。扫描页、加密或无文本文件会明确失败；不提供 OCR。修订原件须在新版本草稿中上传。支持PDF、DOCX、UTF-8 TXT/Markdown，最多50MB、1000页。
 
 执行 `.venv/Scripts/python.exe scripts/setup_models.py --download --reindex` 下载实际向量模型；不稳定网络可改用 `scripts/download_embedding.py`，该脚本分段续传并核对官方 SHA256。运行时仅从本地加载，不静默联网下载。模型权重、下载分段与缓存均在 `data/models`，不提交仓库。`EMBEDDING_CACHE_DIR` 可指定独立缓存目录；清单保存模型提交版本，索引按模型提交区分。更换模型后使用“重建索引”或 `--reindex`。
 
 现有 `/retrieval` 保留关键词模式兼容；添加 `mode=hybrid` 明确使用关键词与语义融合。DeepSeek 工作流实际调用混合检索。缺少权重或索引返回明确错误，不冒充成功。检索结果不使用共享缓存。
 
-AI 任务通过 `/ai/requests` 创建与恢复，支持 question、hint、cause、evaluation、lesson。任务和模型调用记录持久化，生成后再次核验引用支持性与提示边界，交付前重新校验权限。候选错因需学生或教师确认；分析题建议需教师按原评分接口确认。失败任务可重试，困难可转教师；教案始终为可编辑草稿。
+旧辅助任务仍通过 `/ai/requests` 保留。当前资料生成、错题诊断、针对性练习和分析题初评使用 `/agent-runs` 与 `teaching_agent` 后台任务，阶段续租180秒。失败可显式重试，不能改数据库状态来跳过校验。详见 [新流程架构](teacher-agent-architecture.md)。
+
+密钥可用`MODEL_API_KEY`或进程环境中的`DEEPSEEK_API_KEY`，空值忽略。Windows用户变量改变后，启动服务的进程也需获得新环境。不要打印、提交密钥。`scripts/test-real-ai.ps1`使用独立数据库；受控适配器只在测试启动器中启用。
 
 费用字段为按配置价格计算的估算美元值，包含价格版本，不代表供应商实际账单。模型输出仍须教师核对；引用审核不是事实正确性的保证。
 

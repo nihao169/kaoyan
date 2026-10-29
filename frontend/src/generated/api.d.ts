@@ -448,6 +448,313 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/content/sources/{version_id}/processing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Processing */
+        get: operations["processing_api_v1_content_sources__version_id__processing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/content/sources/{version_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable */
+        post: operations["enable_api_v1_content_sources__version_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/content/sources/{version_id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate */
+        post: operations["regenerate_api_v1_content_sources__version_id__generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Agent Run */
+        get: operations["agent_run_api_v1_agent_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-runs/{run_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Agent */
+        post: operations["retry_agent_api_v1_agent_runs__run_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Question Bank */
+        get: operations["question_bank_api_v1_teaching_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/questions/{question_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Question */
+        post: operations["disable_question_api_v1_teaching_questions__question_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/questions/{question_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit Generated */
+        put: operations["edit_generated_api_v1_teaching_questions__question_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Teacher Assignments */
+        get: operations["teacher_assignments_api_v1_teacher_assignments_get"];
+        put?: never;
+        /** Publish Assignment */
+        post: operations["publish_assignment_api_v1_teacher_assignments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Student Assignments */
+        get: operations["student_assignments_api_v1_assignments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assignments/{assignment_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Assignment */
+        post: operations["start_assignment_api_v1_assignments__assignment_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assignments/{assignment_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Assignment */
+        post: operations["submit_assignment_api_v1_assignments__assignment_id__submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mistake-diagnoses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mistakes */
+        get: operations["mistakes_api_v1_mistake_diagnoses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remediations/{remediation_id}/diagnose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Diagnose */
+        post: operations["diagnose_api_v1_remediations__remediation_id__diagnose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remediations/{remediation_id}/practice-generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Targeted */
+        post: operations["targeted_api_v1_remediations__remediation_id__practice_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/practice-groups/{practice_id}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open Practice */
+        post: operations["open_practice_api_v1_practice_groups__practice_id__open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/practice-groups/{practice_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Practice */
+        post: operations["submit_practice_api_v1_practice_groups__practice_id__submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher/attempts/{attempt_id}/confirm-ai-evaluation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Evaluation */
+        post: operations["confirm_evaluation_api_v1_teacher_attempts__attempt_id__confirm_ai_evaluation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/content/sources": {
         parameters: {
             query?: never;
@@ -1178,6 +1485,52 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** AgentRunOutput */
+        AgentRunOutput: {
+            /** Id */
+            id: string;
+            /** Purpose */
+            purpose: string;
+            /** State */
+            state: string;
+            /** Stage */
+            stage: string;
+            /** Source Version Id */
+            source_version_id: string | null;
+            /** Attempt Id */
+            attempt_id: string | null;
+            /** Input */
+            input: {
+                [key: string]: unknown;
+            };
+            /** Output */
+            output: {
+                [key: string]: unknown;
+            };
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Error Code */
+            error_code: string;
+            /** Model */
+            model: string;
+            /** Workflow Version */
+            workflow_version: string;
+            /** Created At */
+            created_at: string;
+        };
+        /** AssignmentInput */
+        AssignmentInput: {
+            /** Title */
+            title: string;
+            /** Class Id */
+            class_id: string;
+            /** Question Ids */
+            question_ids: string[];
+            /** Due At */
+            due_at?: string | null;
+        };
         /** AttemptOutput */
         AttemptOutput: {
             /** Id */
@@ -1220,6 +1573,17 @@ export interface components {
             events?: {
                 [key: string]: unknown;
             }[] | null;
+            /**
+             * Grading State
+             * @default 未提交
+             */
+            grading_state: string;
+            /** Ai Suggestion */
+            ai_suggestion?: {
+                [key: string]: unknown;
+            } | null;
+            /** Group Url */
+            group_url?: string | null;
         };
         /** Body_replace_original_api_v1_documents__version_id__original_post */
         Body_replace_original_api_v1_documents__version_id__original_post: {
@@ -1228,12 +1592,15 @@ export interface components {
         };
         /** Body_upload_api_v1_content_sources_upload_post */
         Body_upload_api_v1_content_sources_upload_post: {
-            /** Knowledge Id */
-            knowledge_id: string;
-            /** Rights */
-            rights: string;
             /** File */
             file: string;
+            /** Knowledge Id */
+            knowledge_id?: string | null;
+            /**
+             * Rights
+             * @default 教师提供，限本机构教学使用
+             */
+            rights: string;
         };
         /** CardCauses */
         CardCauses: {
@@ -1283,6 +1650,13 @@ export interface components {
              * @enum {string}
              */
             cause: "概念混淆" | "原理适用" | "材料理解" | "论证表达" | "审题" | "时间管理" | "原理适用错误" | "材料理解偏差" | "选项辨析错误" | "论证表达不足" | "审题或时间管理";
+        };
+        /** ConfirmEvaluation */
+        ConfirmEvaluation: {
+            /** Parts */
+            parts?: number[] | null;
+            /** Feedback */
+            feedback?: string | null;
         };
         /** DiagnosticInput */
         DiagnosticInput: {
@@ -1414,6 +1788,28 @@ export interface components {
              */
             retrieval: string;
         };
+        /** GenerationSettings */
+        GenerationSettings: {
+            /**
+             * Single
+             * @default 6
+             */
+            single: number;
+            /**
+             * Multiple
+             * @default 4
+             */
+            multiple: number;
+            /**
+             * Essay
+             * @default 2
+             */
+            essay: number;
+            /** Chapters */
+            chapters?: number[];
+            /** Supplement Ids */
+            supplement_ids?: string[];
+        };
         /** GoalInput */
         GoalInput: {
             /** Subject Id */
@@ -1424,6 +1820,26 @@ export interface components {
             target_score: number;
             /** Daily Minutes */
             daily_minutes: number;
+        };
+        /** GroupEntry */
+        GroupEntry: {
+            task: components["schemas"]["TaskOutput"];
+            attempt: components["schemas"]["AttemptOutput"];
+        };
+        /** GroupOutput */
+        GroupOutput: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** State */
+            state: string;
+            /** Due At */
+            due_at: string | null;
+            /** Entries */
+            entries: components["schemas"]["GroupEntry"][];
+            /** Origin Attempt Id */
+            origin_attempt_id?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1458,6 +1874,11 @@ export interface components {
             created_at: string;
             task: components["schemas"]["TaskOutput"];
             evaluation: components["schemas"]["EvaluationOutput"] | null;
+            /**
+             * Grading State
+             * @default 历史记录
+             */
+            grading_state: string;
         };
         /** JobOutput */
         JobOutput: {
@@ -1731,7 +2152,7 @@ export interface components {
             /** Text */
             text: string;
             /** Knowledge Id */
-            knowledge_id: string;
+            knowledge_id?: string | null;
             /** Rights */
             rights: string;
             /**
@@ -1765,6 +2186,13 @@ export interface components {
             visibility: string;
             /** Source Id */
             source_id: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /** Generation State */
+            generation_state?: string | null;
         };
         /** SourceListOutput */
         SourceListOutput: {
@@ -1863,6 +2291,15 @@ export interface components {
             /** Prompt */
             prompt: string;
             evaluation: components["schemas"]["EvaluationOutput"] | null;
+            /**
+             * Grading State
+             * @default 未提交
+             */
+            grading_state: string;
+            /** Ai Suggestion */
+            ai_suggestion?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** TeacherOverviewOutput */
         TeacherOverviewOutput: {
@@ -4027,6 +4464,1519 @@ export interface operations {
             };
         };
     };
+    processing_api_v1_content_sources__version_id__processing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    enable_api_v1_content_sources__version_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerationSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    regenerate_api_v1_content_sources__version_id__generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerationSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    agent_run_api_v1_agent_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    retry_agent_api_v1_agent_runs__run_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    question_bank_api_v1_teaching_questions_get: {
+        parameters: {
+            query?: {
+                source_version_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    disable_question_api_v1_teaching_questions__question_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    edit_generated_api_v1_teaching_questions__question_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuestionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    teacher_assignments_api_v1_teacher_assignments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    publish_assignment_api_v1_teacher_assignments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    student_assignments_api_v1_assignments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    start_assignment_api_v1_assignments__assignment_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["GroupOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submit_assignment_api_v1_assignments__assignment_id__submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["GroupOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    mistakes_api_v1_mistake_diagnoses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    diagnose_api_v1_remediations__remediation_id__diagnose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                remediation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    targeted_api_v1_remediations__remediation_id__practice_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                remediation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentRunOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    open_practice_api_v1_practice_groups__practice_id__open_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                practice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["GroupOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submit_practice_api_v1_practice_groups__practice_id__submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                practice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["GroupOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    confirm_evaluation_api_v1_teacher_attempts__attempt_id__confirm_ai_evaluation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmEvaluation"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EvaluationOutput"];
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
     sources_api_v1_content_sources_get: {
         parameters: {
             query?: {
@@ -5242,7 +7192,9 @@ export interface operations {
     };
     attempts_api_v1_teacher_attempts_get: {
         parameters: {
-            query?: never;
+            query?: {
+                assignment_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -8,7 +8,39 @@ from app.documents import parse_document
 from app.ai_services import process_request, completion
 from app.ai import WorkflowError
 from app.config import settings
-from conftest import checked, publish_all, create_task, save_and_submit
+from conftest import checked, publish_all as publish_legacy, create_task, save_and_submit
+
+
+def publish_all(teacher):
+    sources=publish_legacy(teacher)
+    me=checked(teacher,'/me')
+    # Legacy auxiliary-AI regressions explicitly grant these controlled fixtures
+    # as enabled teacher materials; publication alone is no longer AI consent.
+    with SessionLocal.begin() as db:
+        for source in sources:
+            db.add(m.SourceActivation(version_id=source['id'],org_id=me['org_id'],teacher_id=me['id']))
+    return sources
+
+
+@pytest.mark.parametrize('purpose',['question','lesson'])
+def test_auxiliary_ai_cannot_use_unenabled_legacy_material(clients,monkeypatch,purpose):
+    student,teacher,_=clients
+    publish_legacy(teacher)
+    monkeypatch.setattr(settings,'model_api_key','explicit-controlled-key')
+    with SessionLocal() as db:
+        q=db.scalar(select(m.QuestionVersion).where(m.QuestionVersion.kind=='single'))
+        qid,kid=q.id,q.knowledge_id
+    if purpose=='question':
+        a=create_task(student,qid)
+        request=checked(student,'/ai/requests','POST',{'purpose':'question','attempt_id':a['id']},status=202)
+    else:
+        request=checked(teacher,'/ai/requests','POST',{'purpose':'lesson','knowledge_id':kid},status=202)
+    def forbidden(*args,**kwargs):
+        pytest.fail('Model must not be called without enabled evidence')
+    monkeypatch.setattr('app.ai_services.completion',forbidden)
+    with pytest.raises(WorkflowError) as error:
+        process_request(request['id'])
+    assert error.value.code==('SOURCE_NOT_ENABLED' if purpose=='question' else 'NO_EVIDENCE')
 
 
 def test_pdf_original_review_and_historical_preview(clients):
@@ -136,10 +168,10 @@ def test_provider_error_mapping(monkeypatch,status,code):
     assert error.value.code==code
 
 
-def test_docx_parser_real_conversion(clients):
+def test_docx_parser_real_conversion(clients,document_fixture):
     from pathlib import Path
     _,teacher,_=clients
-    path=Path(__file__).resolve().parents[2]/'docs/samples/politics-01-v1.docx'
+    path=document_fixture/'sample.docx'
     knowledge=checked(teacher,'/catalog')['knowledge'][0]['id']
     r=teacher.post('/api/v1/content/sources/upload',data={'knowledge_id':knowledge,'rights':'original sample'},files={'file':('sample.docx',path.read_bytes())})
     version=r.json()['data']['id']
@@ -177,13 +209,13 @@ def test_ai_v2_rejection_recovery_and_score_integrity(clients,monkeypatch,mode):
     assert checked(student,'/attempts/'+a['id'])['hint_level'] == 0
 
 
-def test_document_original_preview_in_backup(clients):
+def test_document_original_preview_in_backup(clients,document_fixture):
     from pathlib import Path
     from uuid import uuid4
     from app.config import ROOT
     from app.backup import create, validate
     _,teacher,_=clients
-    body=(ROOT/'docs/samples/politics-01-v1.pdf').read_bytes()
+    body=(document_fixture/'sample.pdf').read_bytes()
     knowledge=checked(teacher,'/catalog')['knowledge'][0]['id']
     r=teacher.post('/api/v1/content/sources/upload',data={'knowledge_id':knowledge,'rights':'test'},files={'file':('original.pdf',body)})
     version=r.json()['data']['id']
@@ -228,7 +260,7 @@ def test_source_revoked_during_ai_is_not_delivered(clients,monkeypatch):
     assert result['state']=='failed' and result['error_code']=='CONTENT_UNAVAILABLE' and not result['result']
 
 
-def test_background_conversion_releases_database_transaction(clients,monkeypatch):
+def test_background_conversion_releases_database_transaction(clients,monkeypatch,document_fixture):
     import shutil
     from pathlib import Path
     from types import SimpleNamespace
@@ -238,11 +270,11 @@ def test_background_conversion_releases_database_transaction(clients,monkeypatch
         # This write would fail with BUSY/timeout if conversion retained its DB lock.
         with SessionLocal.begin() as db: db.add(m.AuditEvent(action='test.converter.database.unlocked'))
         output=Path(command[command.index('--outdir')+1])/(Path(command[-1]).stem+'.pdf')
-        shutil.copy2(ROOT/'docs/samples/politics-01-v1.pdf',output)
+        shutil.copy2(document_fixture/'sample.pdf',output)
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr('app.documents.subprocess.run',convert)
     knowledge=checked(teacher,'/catalog')['knowledge'][0]['id']
-    r=teacher.post('/api/v1/content/sources/upload',data={'knowledge_id':knowledge,'rights':'test'},files={'file':('sample.docx',(ROOT/'docs/samples/politics-01-v1.docx').read_bytes())})
+    r=teacher.post('/api/v1/content/sources/upload',data={'knowledge_id':knowledge,'rights':'test'},files={'file':('sample.docx',(document_fixture/'sample.docx').read_bytes())})
     version=r.json()['data']['id']
     for _ in range(30):
         if not tick(): break

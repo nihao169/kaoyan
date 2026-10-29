@@ -278,7 +278,7 @@ def test_upload_validation_and_rejected_content_can_be_corrected(clients):
     student, teacher, _ = clients
     knowledge = checked(teacher, '/catalog')['knowledge'][0]['id']
     fields = {'knowledge_id': knowledge, 'rights': '原创测试内容'}
-    for filename, content, status in [('bad.html', b'<script>bad</script>', 422), ('empty.txt', b'', 422), ('bad.txt', b'\xff\xfe\xfa', 422), ('large.txt', b'x' * (5*1024*1024+1), 413)]:
+    for filename, content, status in [('bad.html', b'<script>bad</script>', 422), ('empty.txt', b'', 422), ('bad.txt', b'\xff\xfe\xfa', 422), ('large.txt', b'x' * (50*1024*1024+1), 413)]:
         response = teacher.post('/api/v1/content/sources/upload', data=fields, files={'file': (filename, content)})
         assert response.status_code == status, response.text
     response = teacher.post('/api/v1/content/sources/upload', data=fields, files={'file': ('original.md', '# 主题\n\n定义与适用条件。'.encode('utf-8'))})

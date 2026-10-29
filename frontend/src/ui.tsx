@@ -29,7 +29,7 @@ export function PageTitle({title,description,action}:{title:string;description:s
 
 export function State({query,children}:{query:{isPending:boolean;error:Error|null;refetch:()=>unknown};children:React.ReactNode}) {
   if (query.isPending) return <div className="loading"><Spin tip="正在读取已保存的记录"><div/></Spin></div>;
-  if (query.error) return <Alert type="error" showIcon message={query.error.message} description={query.error instanceof ApiError && query.error.status===401 ? '登录已失效，请刷新页面重新登录。' : '数据未被修改，可稍后重试。'} action={<Button onClick={()=>query.refetch()}>重试</Button>}/>;
+  if (query.error) return <Alert type="error" showIcon message={query.error.message} description={query.error instanceof ApiError && query.error.status===401 ? '登录已失效，请刷新页面重新登录。' : '暂时无法读取记录。服务恢复后，点击重试即可继续。'} action={<Button onClick={()=>query.refetch()}>重试</Button>}/>;
   return <>{children}</>;
 }
 

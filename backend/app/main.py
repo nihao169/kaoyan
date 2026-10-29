@@ -14,6 +14,7 @@ from .config import settings
 from .db import SessionLocal
 from . import routes_identity, routes_learning, routes_content, routes_teacher
 from . import routes_extensions
+from . import routes_workflows
 
 logger = logging.getLogger('zhixing')
 
@@ -94,7 +95,8 @@ def create_app():
         return {'status': 'ready', 'migration': revision, 'ai': 'configured' if settings.model_api_key and settings.model_name and settings.model_base_url else 'not_configured',
                 'retrieval': 'ready' if getattr(app.state, 'retrieval_ready', False) else 'not_ready'}
 
-    for module in (routes_identity, routes_learning, routes_content, routes_teacher, routes_extensions):
+    # Fixed workflow actions must precede the legacy /content/sources/{id}/{action} route.
+    for module in (routes_identity, routes_learning, routes_workflows, routes_content, routes_teacher, routes_extensions):
         app.include_router(module.router, prefix='/api/v1')
 
     def openapi():

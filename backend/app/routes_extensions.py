@@ -1,7 +1,7 @@
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from pydantic import BaseModel, Field
 from . import models as m, schemas as s
 from .auth import context, need, teacher_can_view
@@ -53,9 +53,9 @@ async def replace_original(version_id: str, file: UploadFile = File(...), ctx=De
         fail(409, 'DOCUMENT_BUSY', '已有解析任务，请稍后再替换')
     name = file.filename or ''
     suffix = Path(name).suffix.lower()
-    body = await file.read(5*1024*1024+1)
-    if suffix not in ('.pdf', '.docx') or not body or len(body)>5*1024*1024:
-        fail(422, 'FILE_CONTENT_INVALID', '请上传不超过5MB的PDF或DOCX')
+    body = await file.read(50*1024*1024+1)
+    if suffix not in ('.pdf', '.docx') or not body or len(body)>50*1024*1024:
+        fail(422, 'FILE_CONTENT_INVALID', '请上传不超过50MB的PDF或DOCX')
     if (suffix=='.pdf' and not body.startswith(b'%PDF-')) or (suffix=='.docx' and not body.startswith(b'PK')):
         fail(422, 'DOCUMENT_INVALID', '文件内容与扩展名不符')
     from .documents import store
@@ -82,10 +82,16 @@ def document(version_id: str, ctx=Depends(context), db=Depends(get_db)):
 @router.get('/sources/versions/{version_id}/{file_kind}')
 def original(version_id: str, file_kind: str, ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
-    version_access(db, ctx, version_id)
+    version, source = version_access(db, ctx, version_id)
     if file_kind not in ('original', 'preview'):
         fail(404, 'NOT_FOUND', '文件不存在')
-    row = require(db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == version_id)))
+    row = db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == version_id))
+    if not row:
+        key = version.file_key
+        if file_kind != 'original' or not key or Path(key).name != key:
+            fail(404,'NOT_FOUND','原始文本不存在')
+        return FileResponse(settings.data_dir/'files'/key,media_type='text/plain; charset=utf-8',
+                            filename=source.title,content_disposition_type='attachment')
     key = row.original_key if file_kind == 'original' else row.preview_key
     if not key or Path(key).name != key:
         fail(404, 'NOT_FOUND', '预览尚未生成')
@@ -333,7 +339,7 @@ def knowledge_status(ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
     from .learning import current_evaluation
     result = []
-    for kp in db.scalars(select(m.KnowledgePoint)):
+    for kp in db.scalars(select(m.KnowledgePoint).where(or_(m.KnowledgePoint.org_id==None,m.KnowledgePoint.org_id==ctx.org_id))):
         attempts = list(db.scalars(select(m.Attempt).join(m.QuestionVersion).where(m.Attempt.membership_id == ctx.membership.id,
             m.QuestionVersion.knowledge_id == kp.id, m.Attempt.status != 'draft').order_by(m.Attempt.created_at.desc())))
         state = '待诊断'
@@ -376,8 +382,21 @@ def learning_chain(attempt_id: str, ctx=Depends(context), db=Depends(get_db)):
         verification = db.scalar(select(m.Attempt).where(m.Attempt.task_id == remediation.verification_task_id))
         if verification:
             related.append(verification.id)
+    from .workflows import agent_view, grading_view
+    practices = []
+    from .learning import current_evaluation
+    for practice in db.scalars(select(m.TargetedPractice).where(m.TargetedPractice.origin_attempt_id==original.id)):
+        entries = []
+        for link in db.scalars(select(m.PracticeTask).where(m.PracticeTask.practice_id==practice.id).order_by(m.PracticeTask.position)):
+            attempt = db.scalar(select(m.Attempt).where(m.Attempt.task_id==link.task_id))
+            related.append(attempt.id)
+            entries.append({**entity(attempt,'id','status','answer','response_text','hint_level'),
+                            **grading_view(db,attempt),'evaluation':current_evaluation(db,attempt.id)})
+        practices.append({'id':practice.id,'state':practice.state,'attempts':entries})
     reviews = list(db.scalars(select(m.ReviewSchedule).where(m.ReviewSchedule.attempt_id.in_(related))))
     return {'remediation': entity(remediation, 'id', 'cause', 'cause_status') if remediation else None,
+            'agents': [agent_view(r) for r in db.scalars(select(m.AgentRun).where(m.AgentRun.attempt_id==original.id).order_by(m.AgentRun.created_at))],
+            'practices': practices,
             'verification': entity(verification, 'id', 'status', 'answer', 'response_text', 'hint_level') if verification else None,
             'reviews': [entity(r, 'stage', 'due_at', 'state', 'task_id') for r in reviews],
             'ai': [ai_view(r) for r in db.scalars(select(m.AIRequest).where(m.AIRequest.attempt_id.in_(related)))],

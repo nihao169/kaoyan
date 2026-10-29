@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom';
 import { Alert, Button, Card, Collapse, Input, Select, Space, Table, Tag } from 'antd';
 import { api, key, type Evidence, type Catalog } from './api';
 import { PageTitle, Sources, State, useRun } from './ui';
+import { AgentResult, type AgentRun } from './agents';
 
 type AIRun={id:string;purpose:string;state:string;model:string;attempt_id:string|null;error_code:string;result:{explanation?:string;candidate_cause?:string;reliable?:boolean;dimensions?:Record<string,unknown>[];sources?:Evidence[];notice?:string};metrics:Record<string,unknown>};
 const purposes:Record<string,string>={question:'当前题目答疑',hint:'递进提示',cause:'候选错因',evaluation:'分析题辅助评价',lesson:'教案草稿'};
-const errors:Record<string,string>={MODEL_NOT_CONFIGURED:'尚未配置 DeepSeek Key',MODEL_AUTH_FAILED:'密钥鉴权失败',MODEL_INSUFFICIENT_BALANCE:'模型账户余额不足',MODEL_TIMEOUT:'模型调用超时',MODEL_RATE_LIMIT:'模型请求限流',NO_EVIDENCE:'没有可用审核依据',INDEX_NOT_READY:'资料索引尚未完成',EMBEDDING_MODEL_UNAVAILABLE:'本地向量模型未就绪',MODEL_OUTPUT_INVALID:'模型返回格式不符合要求'};
+const errors:Record<string,string>={MODEL_NOT_CONFIGURED:'尚未配置 DeepSeek Key',MODEL_AUTH_FAILED:'密钥鉴权失败',MODEL_INSUFFICIENT_BALANCE:'模型账户余额不足',MODEL_TIMEOUT:'模型调用超时',MODEL_RATE_LIMIT:'模型请求限流',SOURCE_NOT_ENABLED:'请教师先启用原文并生成内容',NO_EVIDENCE:'没有可用的已启用教师原文',INDEX_NOT_READY:'资料索引尚未完成',EMBEDDING_MODEL_UNAVAILABLE:'本地向量模型未就绪',MODEL_OUTPUT_INVALID:'模型返回格式不符合要求'};
 
 Object.assign(errors,{CONTENT_UNAVAILABLE:'依据资料已撤回或访问权限变化，请联系教师',MODEL_CONFIGURATION_CHANGED:'模型配置已变化，请发起新任务',MODEL_CONNECTION_ERROR:'无法连接模型服务，请检查网络后重试',MODEL_REQUEST_REJECTED:'模型服务拒绝请求，请检查服务端配置',INVALID_CITATION:'引用未通过真实性检查，请转教师核对',WORKER_INTERRUPTED:'任务执行被中断，可以重试',ACCESS_REVOKED:'当前访问权限已变化，请重新登录'});
-const documentErrors:Record<string,string>={DOCX_CONVERTER_REQUIRED:'未找到文档转换工具，请先准备 LibreOffice',DOCX_CONVERSION_FAILED:'DOCX 转换失败，请检查文件后重试',DOCX_CONVERSION_TIMEOUT:'文档转换超时，可以重试或改用文本 PDF',PDF_ENCRYPTED:'PDF 已加密，请使用可读取的文件',SCANNED_PAGE_OCR_UNSUPPORTED:'发现扫描页，当前版本不支持 OCR',DOCUMENT_EMPTY:'文件没有可提取的正文',DOCUMENT_PAGE_LIMIT:'文件超过 300 页限制',DOCUMENT_INVALID:'文件损坏或无法解析',DOCUMENT_CHANGED:'转换期间文件版本发生变化，请重新提交'};
+const documentErrors:Record<string,string>={DOCX_CONVERTER_REQUIRED:'未找到文档转换工具，请先准备 LibreOffice',DOCX_CONVERSION_FAILED:'DOCX 转换失败，请检查文件后重试',DOCX_CONVERSION_TIMEOUT:'文档转换超时，可以重试或改用文本 PDF',PDF_ENCRYPTED:'PDF 已加密，请使用可读取的文件',SCANNED_PAGE_OCR_UNSUPPORTED:'发现扫描页，当前版本不支持 OCR',DOCUMENT_EMPTY:'文件没有可提取的正文',DOCUMENT_PAGE_LIMIT:'文件超过 1000 页限制',DOCUMENT_INVALID:'文件损坏或无法解析',DOCUMENT_CHANGED:'转换期间文件版本发生变化，请重新提交'};
 
 function AIResults({runs}:{runs:AIRun[]}) {
   const {run,busy}=useRun();
@@ -37,7 +38,7 @@ export function AILearning({attemptId,draft,essay,hintLevel,beforeRun,afterRun}:
   async function start(purpose:string){await run(async()=>{await beforeRun();const result=await api('/ai/requests','POST',{purpose,attempt_id:attemptId,question,level},key());await afterRun();return result},'AI 任务已提交');}
   return <Card title="DeepSeek 学习助手"><p>围绕当前题目提问，引用可打开原页。AI 帮助会记录为辅助作答。</p>
     <Input.TextArea aria-label="当前题目疑问" rows={3} value={question} onChange={e=>setQuestion(e.target.value)} maxLength={2000} placeholder="描述卡住的地方，或直接选择分析功能"/>
-    <Space wrap className="section-space"><Button loading={busy} onClick={()=>start('question')}>带依据答疑</Button>{draft?<><Select aria-label="AI提示级别" value={level} onChange={setLevel} options={[1,2,3,4].map(n=>({value:n,label:`第 ${n} 级`,disabled:n>hintLevel+1}))}/><Button loading={busy} onClick={()=>start('hint')}>获取 AI 提示</Button></>:<><Button loading={busy} onClick={()=>start('cause')}>分析候选错因</Button>{essay&&<Button loading={busy} onClick={()=>start('evaluation')}>分维度辅助评价</Button>}</>}</Space>
+    <Space wrap className="section-space"><Button loading={busy} onClick={()=>start('question')}>带依据答疑</Button>{draft?<><Select aria-label="AI提示级别" value={level} onChange={setLevel} options={[1,2,3,4].map(n=>({value:n,label:`第 ${n} 级`,disabled:n>hintLevel+1}))}/><Button loading={busy} onClick={()=>start('hint')}>获取 AI 提示</Button></>:<Link to={'/mistakes?attempt='+attemptId}><Button>进入错题诊断</Button></Link>}</Space>
     <Button block loading={busy} onClick={()=>run(()=>api('/attempts/'+attemptId+'/referrals','POST',{text:question.trim()||'希望教师帮助核对当前题目、依据及学习困难'}),'已提交教师处理')}>转教师帮助</Button>
     <AIResults runs={query.data??[]}/>
   </Card>;
@@ -88,19 +89,21 @@ export function DocumentPreview({versionId,teacher}:{versionId:string;teacher:bo
   if(!d)return null;
   return <section className="panel section-space"><h2>原页与解析对照</h2><Space wrap><Tag>{d.state}</Tag><span>{d.filename}</span><a href={d.original_url} target="_blank" rel="noreferrer">打开原文件</a>{d.preview_url&&<a href={d.preview_url+'#page='+page} target="_blank" rel="noreferrer">打开固定版式 PDF</a>}</Space>
     {d.error_code&&<Alert type="warning" message={documentErrors[d.error_code]??'解析未完成，请联系教师核对文件'} description="扫描件暂不支持 OCR；DOCX 需要本机 LibreOffice 转换器。"/>}
-    {d.state==='parsed'&&<><Select aria-label="原页页码" value={page} onChange={setPage} options={d.pages.map(p=>({value:p.number,label:`第 ${p.number} 页`}))}/><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:24,marginTop:16}}><img style={{width:'100%'}} alt={`原文第 ${page} 页`} src={`/api/v1/sources/versions/${versionId}/pages/${page}?chunk=${encodeURIComponent(page===requested?chunk:'')}`}/><div>{d.pages.find(p=>p.number===page)?.blocks.map((b,i)=><p key={i} style={{whiteSpace:'pre-wrap',background:chunk?'#fff8d8':undefined}}>{b.text}</p>)}</div></div>{teacher&&<Button disabled={d.confirmed} loading={busy} onClick={()=>run(()=>api('/documents/'+versionId+'/confirm','POST'),'已记录原页核对')}>{d.confirmed?'已确认原页核对':'确认原页与提取文本一致'}</Button>}</>}
+    {d.state==='parsed'&&<><Select aria-label="原页页码" value={page} onChange={setPage} options={d.pages.map(p=>({value:p.number,label:`第 ${p.number} 页`}))}/><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:24,marginTop:16}}><img style={{width:'100%'}} alt={`原文第 ${page} 页`} src={`/api/v1/sources/versions/${versionId}/pages/${page}?chunk=${encodeURIComponent(page===requested?chunk:'')}`}/><div>{d.pages.find(p=>p.number===page)?.blocks.map((b,i)=><p key={i} style={{whiteSpace:'pre-wrap',background:chunk?'#fff8d8':undefined}}>{b.text}</p>)}</div></div></>}
     {teacher&&d.state==='failed'&&<Button loading={busy} onClick={()=>run(()=>api('/documents/'+versionId+'/retry','POST'))}>重试解析</Button>}
-    {teacher&&d.state!=='queued'&&<label style={{display:'block',marginTop:16}}>上传修订原文件（PDF / DOCX，最多5MB）<input aria-label="修订原文件" type="file" accept=".pdf,.docx" onChange={e=>{const file=e.target.files?.[0];if(file)run(async()=>{const body=new FormData();body.append('file',file);return api('/documents/'+versionId+'/original','POST',body)},'已提交修订文件解析')}}/></label>}
+    {teacher&&d.state!=='queued'&&<label style={{display:'block',marginTop:16}}>上传修订原文件（PDF / DOCX，最多50MB）<input aria-label="修订原文件" type="file" accept=".pdf,.docx" onChange={e=>{const file=e.target.files?.[0];if(file)run(async()=>{const body=new FormData();body.append('file',file);return api('/documents/'+versionId+'/original','POST',body)},'已提交修订文件解析')}}/></label>}
   </section>;
 }
 
 export function TeacherLearningChain({attemptId}:{attemptId:string}){
-  type Chain={remediation:{id:string;cause:string}|null;verification:{id:string;status:string;answer:string[];response_text:string;hint_level:number}|null;reviews:{stage:number;due_at:string;state:string;task_id:string|null}[];ai:AIRun[];events:{kind:string;payload:Record<string,unknown>;created_at:string}[]};
+  type Chain={remediation:{id:string;cause:string}|null;verification:{id:string;status:string;answer:string[];response_text:string;hint_level:number}|null;agents:AgentRun[];practices:{id:string;state:string;attempts:{id:string;grading_state:string;answer:string[];response_text:string;hint_level:number}[]}[];reviews:{stage:number;due_at:string;state:string;task_id:string|null}[];ai:AIRun[];events:{kind:string;payload:Record<string,unknown>;created_at:string}[]};
   const query=useQuery({queryKey:['learning-chain',attemptId],queryFn:()=>api<Chain>(`/teacher/attempts/${attemptId}/learning-chain`)});
   const {run,busy}=useRun();
   const data=query.data;
   return <section className="panel section-space"><h2>补学、验证与 AI 证据</h2><State query={query}>{data?.remediation&&<Space wrap><span>确认错因：{data.remediation.cause}</span><Select aria-label="教师修正错因" placeholder="选择修正错因" style={{minWidth:180}} disabled={busy} options={['概念混淆','原理适用','材料理解','论证表达','审题','时间管理'].map(c=>({value:c,label:c}))} onChange={cause=>run(()=>api('/teacher/remediations/'+data.remediation!.id+'/cause','POST',{cause}),'错因修正及补学路径已保存')}/></Space>}<AIResults runs={data?.ai??[]}/><Collapse items={[{key:'chain',label:'新题验证、复习与错因修订',children:<>
-    {data?.verification?<div><h3>新题验证</h3><p>{data.verification.response_text||data.verification.answer.join('、')} · {data.verification.hint_level?'使用过提示':'未使用提示'}</p><Link to={'/teacher/attempts/'+data.verification.id}>查看验证作答与评价</Link></div>:<p>尚无新题验证作答。</p>}
+    {data?.agents.map(a=><AgentResult key={a.id} item={a}/>)}
+    {data?.practices.map(p=><div key={p.id}><h3>针对性练习 · {p.state==='submitted'?'已提交':'作答中'}</h3>{p.attempts.map((a,i)=><p key={a.id}><Link to={'/teacher/attempts/'+a.id}>第 {i+1} 题：{a.grading_state}</Link> · {a.hint_level?'使用过提示':'未使用提示'} · {a.response_text||a.answer.join('、')||'暂无答案'}</p>)}</div>)}
+    {data?.verification?<div><h3>历史新题验证</h3><p>{data.verification.response_text||data.verification.answer.join('、')} · {data.verification.hint_level?'使用过提示':'未使用提示'}</p><Link to={'/teacher/attempts/'+data.verification.id}>查看验证作答与评价</Link></div>:null}
     <Table rowKey={r=>String(r.stage)+r.due_at} pagination={false} dataSource={data?.reviews??[]} columns={[{title:'复习阶段',dataIndex:'stage'},{title:'安排时间',dataIndex:'due_at',render:v=>new Date(v).toLocaleString('zh-CN')},{title:'进度',dataIndex:'state',render:v=>({scheduled:'待复习',completed:'已完成',needs_remediation:'需补学',cancelled:'已取消'}[v as string]??v)}]}/>
     {data?.events.filter(e=>e.kind==='cause_changed').map((e,i)=><p key={i}>{new Date(e.created_at).toLocaleString('zh-CN')}：错因由“{String(e.payload.before)}”修订为“{String(e.payload.after)}”。</p>)}
   </>}]} /></State></section>;

@@ -71,10 +71,13 @@ def process_index(version_id):
                 db.add(m.ChunkEmbedding(chunk_id=cid, model_revision=revision, vectors=vectors))
 
 
-def hybrid(db, ctx, query, knowledge_id=None, version_id=None):
+def hybrid(db, ctx, query, knowledge_id=None, version_id=None, enabled_only=False):
     from .content import retrieve
     # retrieve performs permission/version filtering before any vectors or text are scored.
     candidates = retrieve(db, ctx, '', knowledge_id, version_id, limit=None)
+    if enabled_only:
+        active_ids=set(db.scalars(select(m.SourceActivation.version_id)))
+        candidates=[item for item in candidates if item['version_id'] in active_ids]
     if not candidates:
         return []
     query_vectors = encode_segments(query)

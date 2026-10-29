@@ -20,6 +20,9 @@ def tick():
             if expired.kind == 'ai_request':
                 run = db.get(m.AIRequest, expired.resource_id)
                 run.state, run.error_code = expired.state, expired.error_code
+            elif expired.kind == 'teaching_agent':
+                run = db.get(m.AgentRun, expired.resource_id)
+                run.state, run.error_code = expired.state, expired.error_code
         job = db.scalar(select(m.Job).where(m.Job.state == 'queued').order_by(m.Job.created_at))
         job_id = None
         if job:
@@ -29,6 +32,8 @@ def tick():
                 job_id = job.id
                 if job.kind == 'ai_request':
                     db.get(m.AIRequest, job.resource_id).state = 'running'
+                elif job.kind == 'teaching_agent':
+                    db.get(m.AgentRun, job.resource_id).state = 'running'
         event = db.scalar(select(m.OutboxEvent).where(m.OutboxEvent.state == 'queued').order_by(m.OutboxEvent.created_at))
         if event:
             a = db.get(m.Attempt, event.attempt_id)
@@ -46,6 +51,9 @@ def tick():
         elif kind == 'ai_request':
             from .ai_services import process_request
             process_request(resource_id)
+        elif kind == 'teaching_agent':
+            from .teaching_agent import process
+            process(resource_id)
         elif kind == 'document':
             from .documents import parse_document
             with SessionLocal() as db:
@@ -61,7 +69,7 @@ def tick():
                 parse_chunks(db, version)
                 source = db.get(m.Source, version.source_id)
                 db.add(m.Job(org_id=source.org_id, owner_id=source.owner_id, kind='index', resource_id=version.id))
-            elif job.kind in ('tutor', 'ai_request', 'document', 'index'):
+            elif job.kind in ('tutor', 'ai_request', 'document', 'index', 'teaching_agent'):
                 pass
             else:
                 raise WorkflowError('UNKNOWN_JOB')
@@ -81,6 +89,10 @@ def tick():
             elif job.kind == 'ai_request':
                 run = db.get(m.AIRequest, job.resource_id)
                 run.state, run.error_code = job.state, code
+            elif job.kind == 'teaching_agent':
+                run = db.get(m.AgentRun, job.resource_id)
+                run.state, run.error_code = job.state, code
+                run.stage = '等待重试' if job.state == 'queued' else '处理失败，可重试或修改资料'
             elif job.kind == 'document':
                 doc = db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == job.resource_id))
                 doc.state, doc.error_code = 'failed', code

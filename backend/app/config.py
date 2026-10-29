@@ -1,15 +1,16 @@
 from pathlib import Path
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / '.env', extra='ignore')
+    model_config = SettingsConfigDict(env_file=ROOT / '.env', extra='ignore', env_ignore_empty=True)
     database_url: str = f"sqlite:///{(ROOT / 'data/platform.db').as_posix()}"
     data_dir: Path = ROOT / 'data'
     model_base_url: str = 'https://api.deepseek.com'
-    model_api_key: str = ''
+    model_api_key: str = Field(default='', validation_alias=AliasChoices('MODEL_API_KEY', 'DEEPSEEK_API_KEY'))
     model_name: str = 'deepseek-flash'
     model_timeout: int = 30
     secure_cookies: bool = False
