@@ -3,6 +3,7 @@ import asyncio
 import json
 import time
 import httpx
+from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from typing import Literal, TypedDict
 from pydantic import BaseModel, ConfigDict, Field
@@ -208,9 +209,38 @@ def process_request(request_id):
     if model_name not in (settings.model_name, TUTOR_CHAT):
         raise WorkflowError('MODEL_CONFIGURATION_CHANGED')
     def tracked_completion(prompt):
+        revoked = None
+        last_check = 0.0
+        last_turn = metrics.get('external_id')
+
+        def check_access(db):
+            current = request_context(db, db.get(m.AIRequest, request_id))
+            for vid in metrics['authorized_versions']:
+                evidence_access(db, current, vid)
+
+        def on_event(event):
+            nonlocal revoked, last_check, last_turn
+            turn = event.get('turn_id')
+            if turn and turn != last_turn:
+                last_turn = turn
+                with SessionLocal.begin() as db:
+                    db.get(m.AIRequest, request_id).metrics = dict(metrics)
+            if revoked is None and (time.monotonic() - last_check >= 3 or event.get('type') == 'done'):
+                last_check = time.monotonic()
+                try:
+                    with SessionLocal() as db:
+                        check_access(db)
+                except WorkflowError as exc:
+                    revoked = exc
+            return revoked is not None
+
         try:
             if model_name == TUTOR_CHAT:
-                return advisory_completion(model_name, principal, request_id, prompt, metrics)
+                with SessionLocal.begin() as db:
+                    check_access(db)
+                    for job in db.scalars(select(m.Job).where(m.Job.kind == 'ai_request', m.Job.resource_id == request_id, m.Job.state == 'running')):
+                        job.lease_until = (datetime.now(timezone.utc) + timedelta(seconds=settings.deeptutor_timeout + 60)).isoformat()
+                return advisory_completion(model_name, principal, request_id, prompt, metrics, on_event=on_event)
             return completion(prompt, metrics)
         finally:
             if model_name != TUTOR_CHAT:
@@ -218,6 +248,8 @@ def process_request(request_id):
                 metrics['estimated_cost_usd'] = (metrics.get('prompt_tokens', 0)*settings.model_input_price + metrics.get('completion_tokens', 0)*settings.model_output_price)/1_000_000
             with SessionLocal.begin() as log_db:
                 log_db.get(m.AIRequest, request_id).metrics = dict(metrics)
+            if revoked is not None:
+                raise revoked
 
     class State(TypedDict, total=False):
         generated: dict

@@ -168,7 +168,8 @@ def test_annual_resources_and_offline_deadline(clients, monkeypatch):
     assert call(student,exam_path+'/submit','POST',{'answers':{first['task_id']:{'answer':['B']}}})['used_saved_answers']
 
 
-def test_deeptutor_stream_reconnects_without_new_submission(monkeypatch):
+@pytest.mark.parametrize('cancel_while_silent', [False, True])
+def test_deeptutor_stream_reconnects_or_cancels_without_new_submission(monkeypatch, cancel_while_silent):
     import asyncio
     import json
     from app.v2 import tutor
@@ -181,6 +182,9 @@ def test_deeptutor_stream_reconnects_without_new_submission(monkeypatch):
          {'type':'content','turn_id':'same-turn','seq':2,'content':'后半'},
          {'type':'done','turn_id':'same-turn','seq':3,'metadata':{'status':'completed'}}],
     ]
+    if cancel_while_silent:
+        streams = [[{'type':'content','turn_id':'same-turn','seq':1,'content':'前半'}, TimeoutError(),
+                    {'type':'done','turn_id':'same-turn','seq':2,'metadata':{'status':'cancelled'}}]]
     class Exchange:
         status_code=200
         def json(self): return {'token':'fake'}
@@ -195,14 +199,25 @@ def test_deeptutor_stream_reconnects_without_new_submission(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self,*args): pass
         async def send(self,value): sent.append(json.loads(value))
-        async def __aiter__(self):
-            for value in self.events:
-                yield json.dumps(value)
+        async def recv(self):
+            value = next(self.events, None)
+            if value is None:
+                raise OSError('connection interrupted')
+            if isinstance(value, Exception):
+                raise value
+            return json.dumps(value)
     monkeypatch.setattr(tutor.httpx,'AsyncClient',Client)
     monkeypatch.setattr('websockets.asyncio.client.connect',Socket)
-    assert asyncio.run(tutor.execute('example','question','chat','one-submit',lambda event:False))=='前半后半'
+    result = asyncio.run(tutor.execute('example','question','chat','one-submit',
+                                      lambda event: cancel_while_silent and event['type'] == 'heartbeat'))
     assert sent[0]['type']=='start_turn'
-    assert sent[1]=={'type':'subscribe_turn','turn_id':'same-turn','after_seq':1,'protocol_version':'2.0'}
+    assert len(sent) == 2
+    if cancel_while_silent:
+        assert result == ''
+        assert sent[1] == {'type':'cancel_turn','turn_id':'same-turn','command_id':'one-submit:cancel','protocol_version':'2.0'}
+    else:
+        assert result == '前半后半'
+        assert sent[1]=={'type':'subscribe_turn','turn_id':'same-turn','after_seq':1,'protocol_version':'2.0'}
 
 
 def make_question(task_id, material, p, answer=None, essay=False):
