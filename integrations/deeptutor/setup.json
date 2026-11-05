@@ -1,0 +1,10 @@
+{
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPTUTOR_SETUP_LLM_KEY",
+    "api_format": "openai_chat"
+  },
+  "system": {"backend_port": 8001, "frontend_port": 3782}
+}

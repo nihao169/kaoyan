@@ -4,7 +4,8 @@ import time
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
@@ -15,6 +16,10 @@ from .db import SessionLocal
 from . import routes_identity, routes_learning, routes_content, routes_teacher
 from . import routes_extensions
 from . import routes_workflows
+from .v2.routes import router as v2_router
+from .v2.identity import router as v2_identity
+from .v2.assessments import router as v2_assessments
+from .v2.exam_resources import router as v2_exam_resources
 
 logger = logging.getLogger('zhixing')
 
@@ -23,12 +28,13 @@ def create_app():
     @asynccontextmanager
     async def lifespan(app):
         from .search import encode_segments, SearchUnavailable
-        try:
-            encode_segments('学习资料检索准备')
-            app.state.retrieval_ready = True
-        except SearchUnavailable:
-            app.state.retrieval_ready = False
-            logger.warning('local retrieval not ready; run scripts/setup_models.py --download')
+        app.state.retrieval_ready = False
+        if settings.legacy_retrieval_enabled:
+            try:
+                encode_segments('学习资料检索准备')
+                app.state.retrieval_ready = True
+            except SearchUnavailable:
+                logger.warning('local retrieval not ready; run scripts/setup_models.py --download')
         yield
     app = FastAPI(title='知行研学平台 API', version='0.2.0', description='政治学习、资料原页、混合检索与 DeepSeek 辅助教学。', lifespan=lifespan)
     @app.middleware('http')
@@ -82,29 +88,48 @@ def create_app():
 
     @app.get('/health/ready')
     def ready():
-        from pathlib import Path
         import tempfile
         with SessionLocal() as db:
             revision = db.execute(text('SELECT version_num FROM alembic_version')).scalar_one()
             db.execute(text('SELECT id FROM users LIMIT 1'))
+            if settings.frontend_dist:
+                db.execute(text('SELECT id FROM v2_exam_resources LIMIT 1'))
         if not revision:
             return JSONResponse({'status': 'not_ready'}, status_code=503)
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryFile(dir=settings.data_dir) as file:
             file.write(b'readiness')
         return {'status': 'ready', 'migration': revision, 'ai': 'configured' if settings.model_api_key and settings.model_name and settings.model_base_url else 'not_configured',
-                'retrieval': 'ready' if getattr(app.state, 'retrieval_ready', False) else 'not_ready'}
+                'retrieval': 'ready' if getattr(app.state, 'retrieval_ready', False) else 'not_ready',
+                'deeptutor': 'configured' if settings.deeptutor_url and settings.deeptutor_bridge_secret else 'not_configured'}
+
+    @app.get('/health/ai')
+    def ai_health():
+        import httpx
+        if not settings.deeptutor_url or len(settings.deeptutor_bridge_secret) < 32:
+            return JSONResponse({'status':'not_configured'}, status_code=503)
+        try:
+            response = httpx.get(settings.deeptutor_url.rstrip('/')+'/health/ready', timeout=2)
+            if response.is_success and response.json().get('status') == 'ready':
+                return {'status':'ready','checks':['deeptutor_runtime']}
+        except (httpx.HTTPError, ValueError, AttributeError):
+            pass
+        return JSONResponse({'status':'unavailable'}, status_code=503)
 
     # Fixed workflow actions must precede the legacy /content/sources/{id}/{action} route.
     for module in (routes_identity, routes_learning, routes_workflows, routes_content, routes_teacher, routes_extensions):
         app.include_router(module.router, prefix='/api/v1')
+    app.include_router(v2_router, prefix='/api/v2')
+    app.include_router(v2_identity, prefix='/api/v2')
+    app.include_router(v2_assessments, prefix='/api/v2')
+    app.include_router(v2_exam_resources, prefix='/api/v2')
 
     def openapi():
         if app.openapi_schema:
             return app.openapi_schema
         schema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
         for path, item in schema['paths'].items():
-            if not path.startswith('/api/v1/'):
+            if not path.startswith(('/api/v1/', '/api/v2/')):
                 continue
             for operation in item.values():
                 if not isinstance(operation, dict) or 'responses' not in operation:
@@ -122,6 +147,16 @@ def create_app():
         app.openapi_schema = schema
         return schema
     app.openapi = openapi
+    if settings.frontend_dist:
+        dist = settings.frontend_dist.resolve(strict=True)
+        app.mount('/assets', StaticFiles(directory=dist / 'assets'), name='frontend-assets')
+
+        @app.get('/{path:path}', include_in_schema=False)
+        def spa(path: str):
+            # API mistakes must retain their 404, even on the same origin as the SPA.
+            if path.partition('/')[0] in ('api', 'health', 'internal') or '.' in path.rsplit('/', 1)[-1]:
+                return JSONResponse({'error': {'code': 'NOT_FOUND', 'message': '资源不存在'}}, status_code=404)
+            return FileResponse(dist / 'index.html', media_type='text/html')
     return app
 
 

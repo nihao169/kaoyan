@@ -1,6 +1,7 @@
 from alembic import context
 from app.db import Base, engine
 from app import models
+from app.v2 import models as v2_models
 
 config = context.config
 

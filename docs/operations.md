@@ -1,5 +1,7 @@
 # 运行维护说明
 
+> 本文保留旧环境操作。V2 的独立 PostgreSQL、DeepTutor、5183/8003 端口、启动停止及备份恢复见 [V2 实现与验收](v2-implementation.md)。不要将旧 SQLite 备份命令当作 V2 备份方式。
+
 ## 1 目录与环境
 
 项目根目录为 D:\kaoyan；脚本从自身位置解析路径，不要求从特定终端目录运行。后端使用 .venv，前端依赖保存在 frontend/node_modules。

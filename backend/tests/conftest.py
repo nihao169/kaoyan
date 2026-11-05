@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 import pytest
 from alembic import command
@@ -18,6 +19,11 @@ def environment(tmp_path, monkeypatch, request):
     data = tmp_path / 'data'
     data.mkdir()
     url = f'sqlite:///{(data / "test.db").as_posix()}'
+    if os.environ.get('V2_TEST_DATABASE_URL'):
+        from sqlalchemy.engine import make_url
+        url = os.environ['V2_TEST_DATABASE_URL']
+        if make_url(url).database != 'zhixing_v2_test':
+            raise RuntimeError('V2_TEST_DATABASE_URL must target the isolated zhixing_v2_test database')
     engine = database.make_engine(url)
     monkeypatch.setattr(database, 'engine', engine)
     monkeypatch.setattr(settings, 'database_url', url)
@@ -36,6 +42,11 @@ def environment(tmp_path, monkeypatch, request):
     cfg = Config(str(ROOT / 'backend/alembic.ini'))
     cfg.set_main_option('script_location', str(ROOT / 'backend/migrations'))
     command.upgrade(cfg, 'head')
+    if url.startswith('postgresql'):
+        from app.db import Base
+        with engine.begin() as connection:
+            for table in reversed(Base.metadata.sorted_tables):
+                connection.execute(table.delete())
     seed(include_demo_content=getattr(request,'param',True))
     yield data
     engine.dispose()

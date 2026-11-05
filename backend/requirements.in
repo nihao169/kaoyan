@@ -13,3 +13,5 @@ pymupdf>=2,<3
 python-docx>=1.2,<2
 sentence-transformers>=6,<7
 reportlab>=5,<6
+psycopg[binary]>=3.3,<3.4
+websockets>=17,<18

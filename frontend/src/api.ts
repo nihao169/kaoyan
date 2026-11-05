@@ -13,14 +13,14 @@ export type Catalog = components['schemas']['CatalogOutput'];
 export class ApiError extends Error { constructor(public code:string, message:string, public status:number) {super(message)} }
 let csrf = '';
 export function setCsrf(value:string) { csrf = value; }
-export async function api<T>(path: string, method='GET', body?: unknown, key?:string): Promise<T> {
+export async function api<T>(path: string, method='GET', body?: unknown, key?:string, prefix='/api/v1'): Promise<T> {
   const headers: Record<string,string> = {};
   if (body && !(body instanceof FormData)) headers['Content-Type']='application/json';
   if (method!=='GET') headers['X-CSRF-Token']=csrf;
   if (key) headers['Idempotency-Key']=key;
   let response: Response;
   try {
-    response = await fetch('/api/v1'+path, {method,credentials:'same-origin',headers,
+    response = await fetch(prefix+path, {method,credentials:'same-origin',headers,
       body: body instanceof FormData ? body : body===undefined ? undefined : JSON.stringify(body)});
   } catch {
     throw new ApiError('NETWORK_ERROR','无法连接学习服务，请检查连接后重试。',0);
@@ -38,6 +38,9 @@ export async function api<T>(path: string, method='GET', body?: unknown, key?:st
     throw new ApiError('INVALID_RESPONSE','服务返回异常，请重试；若持续出现，请联系管理员。',response.status);
   }
   return payload.data as T;
+}
+export function apiV2<T>(path:string, method='GET', body?:unknown, idempotencyKey?:string) {
+  return api<T>(path,method,body,idempotencyKey,'/api/v2');
 }
 export const key = () => crypto.randomUUID();
 export const kindName = (kind:string) => ({single:'单选题',multiple:'多选题',essay:'分析题'}[kind]??kind);

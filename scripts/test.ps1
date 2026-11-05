@@ -11,6 +11,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     & npm run test:e2e
     if ($LASTEXITCODE -ne 0) { throw 'Browser tests failed.' }
+    & npm run test:e2e:v2
+    if ($LASTEXITCODE -ne 0) { throw 'V2 browser tests failed.' }
     & npm run test:api
     if ($LASTEXITCODE -ne 0) { throw 'API client tests failed.' }
 } finally { Pop-Location }

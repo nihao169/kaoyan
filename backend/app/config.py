@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     embedding_local_only: bool = True
     embedding_cache_dir: Path = ROOT / 'data' / 'models'
     document_converter: str = ''
+    deeptutor_url: str = ''
+    deeptutor_bridge_secret: str = ''
+    deeptutor_timeout: int = 120
+    frontend_dist: Path | None = None
+    legacy_retrieval_enabled: bool = True
     model_input_price: float = 0.3
     model_output_price: float = 1.2
     model_price_version: str = 'deepseek-flash-2026-10-28-peak-USD-estimate'

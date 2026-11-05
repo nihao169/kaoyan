@@ -10,7 +10,10 @@ from .ai import run_tutor, WorkflowError
 logger = logging.getLogger('zhixing.worker')
 
 
-def tick():
+def tick(include_v2=True):
+    from .v2.worker import tick as v2_tick
+    if include_v2 and v2_tick():
+        return True
     with SessionLocal.begin() as db:
         now = m.now()
         # Recover leases; cap repeated crashes instead of retrying forever.
@@ -100,16 +103,18 @@ def tick():
     return True
 
 
-def main():
+def main(include_v2=True):
     logging.basicConfig(level=logging.INFO)
     from .search import encode_segments, SearchUnavailable
-    try:
-        encode_segments('学习资料检索准备')
-    except SearchUnavailable:
-        logger.warning('local retrieval unavailable; model setup required')
+    from .config import settings
+    if settings.legacy_retrieval_enabled:
+        try:
+            encode_segments('学习资料检索准备')
+        except SearchUnavailable:
+            logger.warning('local retrieval unavailable; model setup required')
     while True:
         try:
-            if not tick():
+            if not tick(include_v2=include_v2):
                 time.sleep(1)
         except KeyboardInterrupt:
             break

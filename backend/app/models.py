@@ -4,6 +4,8 @@ from sqlalchemy import String, Integer, Text, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 
+# V2 uses the same metadata so Alembic and test environments see both generations.
+
 
 def uid():
     return str(uuid4())

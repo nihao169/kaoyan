@@ -1,0 +1,30 @@
+name: zhixing-v2
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zhixing
+      POSTGRES_DB: zhixing_v2
+      POSTGRES_PASSWORD: ${V2_POSTGRES_PASSWORD:?Run scripts/setup-v2.ps1 first}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - ./data/v2-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhixing -d zhixing_v2"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  deeptutor:
+    image: ghcr.io/hkuds/deeptutor@sha256:4982ca6bf43b98431366b43d1fec674a63656db3fbe49ba18c674bb6f19196dd
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "uvicorn", "bridge:app", "--app-dir", "/integration", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      DEEPTUTOR_BRIDGE_SECRET: ${DEEPTUTOR_BRIDGE_SECRET:?Run scripts/setup-v2.ps1 first}
+      AUTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:18001:8001"
+    volumes:
+      - ./data/v2-deeptutor:/app/data
+      - ./integrations/deeptutor:/integration:ro

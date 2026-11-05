@@ -1,6 +1,7 @@
+param([ValidatePattern('^[a-zA-Z0-9-]+$')][string]$RuntimeName='services')
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$manifestPath = Join-Path $projectRoot '.runtime\services.json'
+$manifestPath = Join-Path $projectRoot ('.runtime\'+$RuntimeName+'.json')
 if (-not (Test-Path -LiteralPath $manifestPath)) { Write-Host 'No recorded services.'; return }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ([IO.Path]::GetFullPath($manifest.root) -ne $projectRoot) { throw 'Service manifest belongs to a different workspace.' }
