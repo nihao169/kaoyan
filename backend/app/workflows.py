@@ -7,7 +7,6 @@ from . import models as m
 from .auth import Context, need, source_allowed, teacher_can_view
 from .errors import fail, require
 from .content import version_access, audit
-from .config import settings
 
 
 def teacher_class(db, ctx, class_id):
@@ -26,13 +25,15 @@ def active_source(db, ctx, version_id):
 
 
 def new_run(db, ctx, purpose, key, data, source_id=None, attempt_id=None):
+    from .ai_services import advisory_model
+
     fingerprint = hashlib.sha256((purpose + ':' + key).encode()).hexdigest()
     previous = db.scalar(select(m.AgentRun).where(m.AgentRun.org_id == ctx.org_id, m.AgentRun.fingerprint == fingerprint))
     if previous:
         return previous
     run = m.AgentRun(org_id=ctx.org_id, owner_id=ctx.user.id, membership_id=ctx.membership.id,
         purpose=purpose, source_version_id=source_id, attempt_id=attempt_id, fingerprint=fingerprint,
-        input=data, model=settings.model_name)
+        input=data, model=advisory_model(purpose))
     db.add(run)
     db.flush()
     db.add(m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='teaching_agent', resource_id=run.id))
@@ -42,6 +43,7 @@ def new_run(db, ctx, purpose, key, data, source_id=None, attempt_id=None):
 def agent_view(run):
     result = {k:getattr(run,k) for k in ('id','purpose','state','stage','source_version_id','attempt_id',
             'input','output','metrics','error_code','model','workflow_version','created_at')}
+    result['metrics'] = {key: value for key, value in run.metrics.items() if key != 'external_id'}
     if run.purpose == 'targeted':
         # Raw generation includes answers, hints and rubrics. Reveal them only through
         # the normal attempt view after submission, never via a progress endpoint.
@@ -53,13 +55,20 @@ def run_access(db, ctx, run_id):
     run = require(db.get(m.AgentRun, run_id))
     if run.org_id != ctx.org_id:
         fail(404, 'NOT_FOUND', '任务不存在')
-    if run.membership_id == ctx.membership.id:
+    def current_result():
+        from .ai_services import TUTOR_MODELS
+        if run.model in TUTOR_MODELS and run.state == 'succeeded':
+            owner = run_context(db, run)
+            for version_id in [run.source_version_id, *run.input.get('supplement_ids', [])]:
+                active_source(db, owner, version_id)
         return run
+    if run.membership_id == ctx.membership.id:
+        return current_result()
     if run.purpose == 'content' and ctx.has('teacher'):
         version_access(db, ctx, run.source_version_id)
-        return run
+        return current_result()
     if run.attempt_id and teacher_can_view(db, ctx, db.get(m.Attempt, run.attempt_id).membership_id):
-        return run
+        return current_result()
     fail(404, 'NOT_FOUND', '任务不存在或无权访问')
 
 

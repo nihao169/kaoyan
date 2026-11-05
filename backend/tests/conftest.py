@@ -62,6 +62,7 @@ def document_fixture(tmp_path_factory):
     doc=Document()
     doc.add_heading('解析测试文档',0)
     doc.add_paragraph(text)
+    doc.add_paragraph('ZHIXING_DOCX_CONVERSION_CHECK')
     doc.save(directory/'sample.docx')
     with fitz.open() as pdf:
         page=pdf.new_page()

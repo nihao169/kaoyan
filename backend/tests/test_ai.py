@@ -76,3 +76,37 @@ def test_ai_workflow_boundaries_and_failure_recovery(clients, monkeypatch, mode)
         assert len(calls) <= (2 if mode == 'timeout' else 1)
         with SessionLocal() as db:
             assert db.scalar(select(func.count()).select_from(m.Citation)) == 0
+def test_structured_teacher_backend_is_pinned_and_does_not_fallback(monkeypatch):
+    import pytest
+    from app import ai_services as ai
+    from app.ai import WorkflowError
+    from app.config import settings
+    from app.v2 import tutor
+
+    monkeypatch.setattr(settings, 'deeptutor_structured_teacher', True)
+    model = ai.advisory_model('initial_evaluation')
+    assert model == ai.TUTOR_CHAT
+    assert ai.advisory_model('targeted') == settings.model_name
+    monkeypatch.setattr(settings, 'deeptutor_structured_teacher', False)
+    calls = []
+
+    async def execute(principal, prompt, capability, submission_id, on_event):
+        calls.append((principal, capability, submission_id))
+        on_event({'turn_id': 'native-turn-123'})
+        assert '教师确认' in prompt
+        if len(calls) == 1:
+            return tutor.TurnResult('{"approved":false}')
+        raise tutor.TutorError('EXECUTION_UNCERTAIN')
+
+    def legacy(*args, **kwargs):
+        pytest.fail('A pinned DeepTutor job must never fall back to the legacy model')
+
+    monkeypatch.setattr(tutor, 'execute_turn', execute)
+    monkeypatch.setattr(ai, 'completion', legacy)
+    metrics = {}
+    prompt = ai.messages('评分建议必须由教师确认', {})
+    assert ai.advisory_completion(model, 'teacher-scope', 'job', prompt, metrics) == {'approved': False}
+    assert metrics['external_id'] == 'native-turn-123' and metrics['provider'] == 'DeepTutor'
+    with pytest.raises(WorkflowError, match='DEEPTUTOR_EXECUTION_FAILED'):
+        ai.advisory_completion(model, 'teacher-scope', 'job', prompt, metrics)
+    assert calls == [('teacher-scope', 'chat', 'job:1'), ('teacher-scope', 'chat', 'job:2')]

@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import date
 from typing import Literal
 from fastapi import APIRouter, Depends, Request, UploadFile, File, Query
@@ -7,10 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from .. import models as old
 from ..auth import context
+from ..config import settings
 from ..api_common import EnvelopeRoute, entity, idempotent
 from ..db import get_db
 from ..errors import fail
-from . import models as m, service as s, search
+from . import models as m, service as s, search, tutor_index
 
 router = APIRouter(route_class=EnvelopeRoute)
 
@@ -67,7 +69,7 @@ class NoteInput(MaterialInput):
 
 
 class AIInput(Input):
-    kind: Literal['chat'] = 'chat'
+    kind: Literal['chat', 'solve', 'read', 'guide'] = 'chat'
     prompt: str = Field(min_length=1, max_length=10000)
     task_id: str | None = None
 
@@ -85,8 +87,14 @@ def task_view(t):
     return entity(t, 'id', 'project_id', 'material_id', 'kind', 'title', 'reason', 'state', 'due_at', 'estimated_minutes')
 
 
-def create_run(db, p, kind, prompt, task_id=None, membership_id=None):
-    run = m.AIRun(project_id=p.id, task_id=task_id, scope_revision=p.scope_revision, kind=kind, prompt=prompt, membership_id=membership_id)
+def create_run(db, p, kind, prompt, task_id=None, membership_id=None, previous_backend=None):
+    backend = {'solve': 'native_solve', 'read': 'native_read', 'guide': 'native_guide'}.get(kind, 'bounded_chat')
+    if kind == 'chat' and settings.deeptutor_native_knowledge:
+        backend = 'native_knowledge'
+    if kind == 'question' and settings.deeptutor_native_questions:
+        backend = 'native_questions'
+    run = m.AIRun(project_id=p.id, task_id=task_id, scope_revision=p.scope_revision, kind=kind, prompt=prompt,
+                  membership_id=membership_id, backend=previous_backend or backend)
     db.add(run)
     db.flush()
     return run
@@ -203,7 +211,13 @@ async def upload(project_id: str, file: UploadFile = File(), ctx=Depends(context
     if not text.strip() or len(text) > 300000:
         fail(422, 'MATERIAL_TEXT_INVALID', '未提取到正文，或正文超过30万字；扫描件请先进行 OCR')
     p = s.project(db, ctx, project_id, lock=True)
+    checksum = hashlib.sha256(content).hexdigest()
+    existing = db.scalar(select(m.Material).where(m.Material.project_id == p.id, m.Material.state == 'ready',
+                                                  m.Material.original_sha256 == checksum).limit(1))
+    if existing:
+        return entity(existing, 'id', 'title', 'state')
     item = s.add_material(db, p, name[:200], text, deduplicate=False)
+    item.original_sha256 = checksum
     from pathlib import Path
     from ..config import settings
     path = settings.data_dir / 'v2-originals' / p.id
@@ -223,6 +237,8 @@ def remove_material(project_id: str, material_id: str, ctx=Depends(context), db=
     material.state = 'revoked'
     p.scope_revision += 1
     p.revision += 1
+    for index in db.scalars(select(m.TutorIndex).where(m.TutorIndex.material_id == material.id, m.TutorIndex.state != 'deleted')):
+        index.next_at = s.clock().isoformat()
     for t in s.rows(db, m.Task, p.id):
         if t.material_id == material.id and t.state != 'completed':
             t.state = 'cancelled'
@@ -279,6 +295,8 @@ def session(task_id: str, ctx=Depends(context), db=Depends(get_db)):
     attempt = db.scalar(select(m.Attempt).where(m.Attempt.task_id == t.id))
     latest_run = db.scalar(select(m.AIRun).where(m.AIRun.task_id == t.id, m.AIRun.kind.in_(['question', 'evaluate'])).order_by(m.AIRun.created_at.desc()))
     return {'task': task_view(t), 'project': project_view(p), 'material': material_view,
+            'native_solve': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
+            'native_lessons': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
             'checkpoint': row.checkpoint if row else {}, 'revision': row.revision if row else 0,
             'question': s.question_view(q, bool(attempt and t.state == 'completed')) if q else None,
             'result': attempt.result if attempt else None, 'ai_run_id': latest_run.id if latest_run else None}
@@ -336,7 +354,11 @@ def prepare(task_id: str, request: Request, data: PreparationInput | None = None
         fail(409, 'INVALID_TRANSITION', '当前任务不能准备练习')
     if t.due_at and s.datetime.fromisoformat(t.due_at) > s.clock():
         fail(409, 'REVIEW_NOT_DUE', '延迟复习尚未到期')
-    s.authorized_materials(db, ctx, p)
+    materials = s.authorized_materials(db, ctx, p)
+    if settings.deeptutor_native_questions:
+        if not settings.deeptutor_native_knowledge:
+            fail(409, 'TUTOR_INDEX_DISABLED', '原生出题需要先启用知识库')
+        require_ready_indexes(db, materials)
     def save():
         if t.payload.get('question_id') or db.scalar(select(m.AIRun.id).where(m.AIRun.task_id == t.id, m.AIRun.kind == 'question', m.AIRun.state.in_(['queued', 'running']))):
             fail(409, 'QUESTION_ALREADY_PREPARING', '题目已准备或正在准备，请查看当前状态')
@@ -399,6 +421,41 @@ def add_note(project_id: str, data: NoteInput, request: Request, ctx=Depends(con
     return idempotent(db, ctx, request, f'v2.note:{p.id}', data.model_dump(), save)
 
 
+def index_status(db, materials):
+    found = tutor_index.mappings(db, materials)
+    return {'enabled': True, 'items': [
+        {'material_id': item.id, 'title': item.title, 'state': row.state, 'error': row.error}
+        if (row := found.get(item.id)) else {'material_id': item.id, 'title': item.title, 'state': 'missing', 'error': ''}
+        for item in materials]}
+
+
+def require_ready_indexes(db, materials):
+    found = tutor_index.mappings(db, materials)
+    if not materials or any(item.id not in found or found[item.id].state != 'ready' for item in materials):
+        fail(409, 'TUTOR_INDEX_NOT_READY', '请在项目的「课程与资料」中准备助教索引，再回来继续')
+
+
+@router.get('/learning-projects/{project_id}/tutor-index')
+def get_tutor_index(project_id: str, ctx=Depends(context), db=Depends(get_db)):
+    p = s.project(db, ctx, project_id)
+    s.no_active_mock(db, p.id)
+    if not settings.deeptutor_native_knowledge:
+        return {'enabled': False, 'items': []}
+    return index_status(db, s.authorized_materials(db, ctx, p))
+
+
+@router.post('/learning-projects/{project_id}/tutor-index', status_code=202)
+def queue_tutor_index(project_id: str, ctx=Depends(context), db=Depends(get_db)):
+    p = s.project(db, ctx, project_id, lock=True)
+    s.no_active_mock(db, p.id)
+    if not settings.deeptutor_native_knowledge:
+        fail(409, 'TUTOR_INDEX_DISABLED', '本环境未启用原生知识库')
+    materials = s.authorized_materials(db, ctx, p)
+    tutor_index.enqueue(db, ctx, p, materials)
+    db.flush()
+    return index_status(db, materials)
+
+
 @router.post('/learning-projects/{project_id}/ai-runs', status_code=202)
 def ai(project_id: str, data: AIInput, request: Request, ctx=Depends(context), db=Depends(get_db)):
     p = s.project(db, ctx, project_id, lock=True)
@@ -406,10 +463,20 @@ def ai(project_id: str, data: AIInput, request: Request, ctx=Depends(context), d
     materials = s.authorized_materials(db, ctx, p)
     if not materials:
         fail(409, 'MATERIAL_REQUIRED', '请先选择课程或添加个人资料')
+    if data.kind == 'solve' and not (settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons):
+        fail(409, 'TUTOR_SOLVE_DISABLED', '本环境未启用原生讲题')
+    if data.kind in ('read', 'guide') and not (settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons):
+        fail(409, 'TUTOR_LESSONS_DISABLED', '本环境未启用原生精读与引导学习')
+    if settings.deeptutor_native_knowledge:
+        require_ready_indexes(db, materials)
     if data.task_id:
         t, _ = s.task(db, ctx, data.task_id)
         if t.project_id != p.id:
             fail(404, 'NOT_FOUND', '任务不属于当前项目')
+    if data.kind == 'solve' and (not data.task_id or t.state != 'completed' or not t.payload.get('question_id')):
+        fail(409, 'SUBMIT_FIRST', '请先完成这道题，再打开讲解')
+    if data.kind == 'read' and (not data.task_id or not t.material_id):
+        fail(409, 'MATERIAL_REQUIRED', '请从含资料的阅读任务打开精读')
     def save():
         run = create_run(db, p, data.kind, data.prompt, data.task_id, ctx.membership.id)
         return {'run_id': run.id, 'state': run.state, 'status_url': f'/api/v2/ai-runs/{run.id}'}
@@ -430,7 +497,24 @@ def authorized_run(db, ctx, run_id):
 
 @router.get('/ai-runs/{run_id}')
 def ai_run(run_id: str, ctx=Depends(context), db=Depends(get_db)):
-    return entity(authorized_run(db, ctx, run_id), 'id', 'state', 'kind', 'result', 'error', 'external_id')
+    return entity(authorized_run(db, ctx, run_id), 'id', 'state', 'kind', 'result', 'error')
+
+
+@router.post('/ai-runs/{run_id}/accept-guide')
+def accept_guide(run_id: str, ctx=Depends(context), db=Depends(get_db)):
+    run = authorized_run(db, ctx, run_id)
+    p = s.project(db, ctx, run.project_id, lock=True)
+    s.no_active_mock(db, p.id)
+    if run.kind != 'guide' or run.state != 'succeeded' or run.scope_revision != p.scope_revision or not run.result.get('citations'):
+        fail(409, 'GUIDE_NOT_ACTIONABLE', '只有含已核对资料的引导建议可以加入计划')
+    citation = run.result['citations'][0]
+    material = s.material_access(db, ctx, db.get(m.Material, citation['material_id']))
+    if material.sha256 != citation['sha256']:
+        fail(403, 'SCOPE_CHANGED', '建议对应的原文版本已变化')
+    task = s.add_task(db, p, 'reading', '引导复习：'+material.title[:190], 'guide:'+run.id,
+        '先回到引导建议引用的原文，再完成独立检查', material.id,
+        {'source_span':[citation['start'], citation['end']]}, minutes=10)
+    return {'task_id': task.id}
 
 
 @router.get('/ai-runs/{run_id}/events')
@@ -450,7 +534,7 @@ def retry(run_id: str, request: Request, ctx=Depends(context), db=Depends(get_db
     if previous.state != 'failed':
         fail(409, 'RETRY_NOT_ALLOWED', '仅失败运行可以显式重试')
     def save():
-        row = create_run(db, p, previous.kind, previous.prompt, previous.task_id, ctx.membership.id)
+        row = create_run(db, p, previous.kind, previous.prompt, previous.task_id, ctx.membership.id, previous.backend)
         return {'run_id': row.id, 'state': row.state}
     return idempotent(db, ctx, request, f'v2.retry:{previous.id}', {}, save)
 

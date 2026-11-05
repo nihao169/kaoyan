@@ -78,6 +78,7 @@ function ProjectContent({p}:{p:Detail}) {
   const materialPanel=<><Space wrap><Button type="primary" disabled={!active} onClick={()=>setMaterialOpen(true)}>粘贴学习资料</Button><label className="v2-file-button">{uploading?'正在导入…':'上传 PDF / Word / 文本'}<input type="file" disabled={uploading||!active} accept=".pdf,.docx,.txt,.md" onChange={e=>{if(e.target.files?.[0])void upload(e.target.files[0]);e.target.value=''}}/></label></Space>
     <div className="v2-course-picker"><Select style={{minWidth:230}} placeholder="选择教师已启用的课程资料" value={selectedCourse} onChange={setSelectedCourse} options={courses.data?.map(c=>({value:c.id,label:c.title+' · v'+c.version}))}/><Button disabled={!selectedCourse||!active} onClick={()=>run(()=>apiV2('/learning-projects/'+p.id+'/course-materials','POST',{source_version_id:selectedCourse}),'已加入项目')}>加入课程资料</Button></div>
     <p className="muted">个人资料默认私有。扫描件需先 OCR；目前每份最多 20 MB、正文30万字。</p>
+    {active&&<TutorIndexPanel projectId={p.id}/>}
     {p.materials.filter(m=>m.state==='ready').map(m=><div className="v2-material" key={m.id}><ReadOutlined/><div><strong>{m.title}</strong><p>{m.source_version_id?'关联课程资料，使用时检查当前权限':'个人资料 · 仅自己可用'}</p></div><Button danger type="text" disabled={!active} onClick={()=>modal.confirm({title:'移除这份学习资料？',content:'关联任务将停止，历史记录保留，旧助教运行不再继续使用。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/materials/'+m.id,'DELETE'),'资料已移除')})}>移除</Button></div>)}
     {p.materials.some(m=>m.state==='ready')?<MaterialSearch projectId={p.id}/>:<Blank description="添加资料后，系统会安排第一项学习任务。"/>}</>;
   return <><PageTitle title={p.title} description={`${p.exam_year} 考研政治 · 每日 ${p.daily_minutes} 分钟 · 计划版本 ${p.revision}`} action={<Link to="/learning/projects">返回项目列表</Link>}/>
@@ -92,6 +93,22 @@ function ProjectContent({p}:{p:Detail}) {
     ]}/>
     <Modal title="添加个人学习资料" open={materialOpen} onCancel={()=>setMaterialOpen(false)} footer={null}><Form form={form} layout="vertical" onFinish={async values=>{const result=await run(()=>apiV2('/learning-projects/'+p.id+'/materials','POST',values,key()),'资料已添加');if(result){setMaterialOpen(false);form.resetFields()}}}><Form.Item name="title" label="资料标题" rules={[{required:true,whitespace:true}]}><Input maxLength={200}/></Form.Item><Form.Item name="text" label="资料正文" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={12} maxLength={300000}/></Form.Item><Button type="primary" htmlType="submit" loading={busy}>保存并加入学习计划</Button></Form></Modal>
   </>;
+}
+
+type TutorIndexStatus = {enabled:boolean;items:{material_id:string;title:string;state:string;error:string}[]};
+const indexLabels:Record<string,string> = {missing:'未建立',queued:'等待处理',indexing:'正在建立',ready:'已就绪',failed:'建立失败',deleted:'已清理'};
+
+function TutorIndexPanel({projectId}:{projectId:string}) {
+  const path='/learning-projects/'+projectId+'/tutor-index';
+  const {run,busy}=useRun();
+  const status=useQuery({queryKey:['v2-tutor-index',projectId],queryFn:()=>apiV2<TutorIndexStatus>(path),
+    refetchInterval:q=>q.state.data?.items.some(item=>['queued','indexing'].includes(item.state))?3000:false});
+  if(!status.data?.enabled||!status.data.items.length)return null;
+  const needsIndex=status.data.items.some(item=>['missing','failed','deleted'].includes(item.state));
+  return <div className="v2-material"><div><strong>助教资料索引</strong>{status.data.items.map(item=><p key={item.material_id}>
+    {item.title}：{indexLabels[item.state]||item.state}{item.error&&` · ${item.error}`}</p>)}</div>
+    {needsIndex&&<Button loading={busy} onClick={async()=>{await run(()=>apiV2(path,'POST'),'已安排建立索引');void status.refetch()}}>
+      准备或重试索引</Button>}</div>;
 }
 
 function ReportPanel({report}:{report:Report}) {
@@ -109,13 +126,15 @@ function NotesPanel({projectId,disabled=false}:{projectId:string;disabled?:boole
   return <><Form form={form} layout="vertical" initialValues={{kind:'note'}} onFinish={async values=>{const result=await run(()=>apiV2('/learning-projects/'+projectId+'/notes','POST',values,key()),'已保存');if(result)form.resetFields()}}><Space><Form.Item name="kind"><Select options={[{value:'note',label:'学习笔记'},{value:'flashcard',label:'记忆闪卡'}]} style={{width:130}}/></Form.Item><Form.Item name="title" rules={[{required:true,whitespace:true}]}><Input placeholder="标题／卡片正面" maxLength={200}/></Form.Item></Space><Form.Item name="text" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={4} placeholder="我的理解／卡片背面"/></Form.Item><Button disabled={disabled} loading={busy} htmlType="submit">保存</Button></Form><State query={query}>{query.data?.map(n=><article className="v2-note" key={n.id}><Tag>{n.kind==='flashcard'?'闪卡':'笔记'}</Tag><h3>{n.title}</h3>{n.kind==='flashcard'?<details><summary>尝试回忆后查看</summary><p>{n.body}</p></details>:<p>{n.body}</p>}</article>)}</State></>;
 }
 
+type StudyData = {task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string;native_solve?:boolean;native_lessons?:boolean};
+
 export function StudyV2() {
   const {taskId}=useParams();
-  const query=useQuery({queryKey:['v2-session',taskId],queryFn:()=>apiV2<{task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string}>('/study-sessions/'+taskId)});
+  const query=useQuery({queryKey:['v2-session',taskId],queryFn:()=>apiV2<StudyData>('/study-sessions/'+taskId)});
   return <State query={query}>{query.data&&<StudyContent key={taskId} data={query.data}/>}</State>;
 }
 
-function StudyContent({data}:{data:{task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string}}) {
+function StudyContent({data}:{data:StudyData}) {
   const {run,busy}=useRun();const navigate=useNavigate();
   const [text,setText]=useState(data.checkpoint.text||'');const [answer,setAnswer]=useState<string[]>(data.checkpoint.answer||[]);
   const [revision,setRevision]=useState(data.revision);const [confidence,setConfidence]=useState('normal');
@@ -128,6 +147,7 @@ function StudyContent({data}:{data:{task:Task;project:Project;material?:Material
   async function save(){const result=await run(()=>apiV2<{revision:number}>('/study-sessions/'+t.id+'/checkpoint','PUT',{revision,text,answer}),'草稿已保存');if(result)setRevision(result.revision)}
   async function generate(){const result=await run(()=>apiV2<{run_id:string}>('/study-sessions/'+t.id+'/prepare','POST',{kind:questionKind},key()));if(result)setRunId(result.run_id)}
   async function ask(){const result=await run(()=>apiV2<{run_id:string}>('/learning-projects/'+data.project.id+'/ai-runs','POST',{kind:'chat',prompt,task_id:t.id},key()));if(result)setRunId(result.run_id)}
+  async function lesson(kind:'solve'|'read'|'guide', request:string){const result=await run(()=>apiV2<{run_id:string}>('/learning-projects/'+data.project.id+'/ai-runs','POST',{kind,prompt:request,task_id:t.id},key()));if(result)setRunId(result.run_id)}
   return <><PageTitle title={t.title} description={t.reason} action={<Link to={'/learning/projects/'+data.project.id}>返回学习项目</Link>}/><div className="v2-study-grid"><section className="v2-reader"><Space><Tag>{names[t.kind]}</Tag><span>{data.material?.title}</span></Space><div className="v2-source-text">{data.material?.text||'暂无可阅读资料'}</div></section><section className="v2-learning-panel">
     <h2>{data.question?'独立尝试':'本次学习'}</h2>
     {!data.question&&['practice','verification','review'].includes(t.kind)&&<Select aria-label="练习题型" value={questionKind} onChange={setQuestionKind} style={{width:180,marginBottom:16}} options={[{value:'single',label:'单选题'},{value:'multiple',label:'多选题'},{value:'essay',label:'分析题训练'}]}/>}
@@ -137,8 +157,14 @@ function StudyContent({data}:{data:{task:Task;project:Project;material?:Material
     </>:['reading','remediation'].includes(t.kind)?<><p>先理解原文，用自己的话记录。完成后将安排一道独立检查题。</p><Input.TextArea rows={5} placeholder="用自己的话写下理解与疑问" value={text} onChange={e=>setText(e.target.value)} disabled={closed}/><Space style={{marginTop:16}}><Button disabled={closed} loading={busy} onClick={save}>保存学习位置</Button><Button type="primary" disabled={closed} loading={busy} onClick={async()=>{const result=await run(()=>apiV2<{next_task_id:string}>('/study-sessions/'+t.id+'/complete','POST',{},key()),'已记录阅读，接下来独立检查');if(result)navigate('/learning/session/'+result.next_task_id)}}>完成阅读，检查理解</Button></Space></>:<><p>从本项目资料准备一道未做过的新题。服务未配置或生成失败时，会保留任务并显示原因。</p><Button type="primary" loading={busy||ai.data?.state==='running'||ai.data?.state==='queued'} disabled={closed} onClick={generate}>准备练习</Button></>}
     {data.result&&<Alert style={{marginTop:20}} type={data.result.correct?'success':'info'} message={data.result.evaluator==='ai_training'?'AI训练评价，不是正式成绩':data.result.correct?'本次回答正确':data.result.state==='pending_ai'?'正在等待AI训练评价':'本次需要补学'} description={data.result.feedback}/>}
     {data.result?.question&&<div className="v2-feedback"><p>参考答案：{data.result.question.answer?.join('、')}</p><p>{data.result.question.explanation}</p><blockquote>{data.result.question.quote}</blockquote><Link to={'/learning/projects/'+data.project.id}><Button type="primary">查看下一步任务</Button></Link></div>}
+    <Space wrap style={{marginTop:12}}>
+      {data.native_solve&&t.state==='completed'&&data.result?.question&&<Button loading={busy} onClick={()=>lesson('solve','请讲解这道题')}>讲这道题</Button>}
+      {data.native_lessons&&data.material&&['reading','remediation'].includes(t.kind)&&<Button loading={busy} onClick={()=>lesson('read','帮我精读这份讲义，找出关键概念和容易混淆的考点')}>读讲义</Button>}
+      {data.native_lessons&&<Button loading={busy} onClick={()=>lesson('guide','围绕当前任务建议下一步复习：'+t.title)}>继续学</Button>}
+    </Space>
     <hr/><h2>随学助教</h2><p className="muted">基于当前项目资料解释，保留问题与执行记录。</p><Input.TextArea aria-label="向助教提问" rows={3} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="例如：这里的两个概念有什么区别？"/><Button style={{marginTop:12}} loading={busy} disabled={!prompt.trim()} onClick={ask}>解释我的问题</Button>
     {ai.data&&<div className="v2-ai-result"><Tag>{({queued:'排队中',running:'正在思考',succeeded:'已完成',failed:'未完成'} as Record<string,string>)[ai.data.state]||ai.data.state}</Tag>{ai.data.error&&<Alert type="error" message={ai.data.error}/>}<p>{ai.data.result.text}</p>{ai.data.result.coverage_note&&<small>{ai.data.result.coverage_note}</small>}{!!ai.data.result.citations?.length&&<CitationList projectId={data.project.id} citations={ai.data.result.citations}/>}</div>}
+    {ai.data?.kind==='guide'&&ai.data.state==='succeeded'&&!!ai.data.result.citations?.length&&<Button loading={busy} onClick={async()=>{const result=await run(()=>apiV2<{task_id:string}>('/ai-runs/'+runId+'/accept-guide','POST'),'已加入学习计划');if(result)navigate('/learning/session/'+result.task_id)}}>加入学习计划</Button>}
     <Button type="text" disabled={closed} onClick={()=>run(()=>apiV2('/tasks/'+t.id,'PATCH',{state:'deferred'}),'已暂缓，任务仍保留在项目中')}>暂缓这项任务</Button>
   </section></div></>;
 }

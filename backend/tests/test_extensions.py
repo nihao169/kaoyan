@@ -177,7 +177,12 @@ def test_docx_parser_real_conversion(clients,document_fixture):
     version=r.json()['data']['id']
     with SessionLocal.begin() as db: parse_document(db,version)
     d=checked(teacher,f'/sources/versions/{version}/document')
-    assert d['preview_url'] and d['pages'] and '实践' in str(d['pages'])
+    assert d['preview_url'] and d['pages']
+    # LibreOffice chooses different CJK line breaks and block boundaries
+    # depending on the installed Windows fonts.
+    extracted = ''.join(''.join(block['text'].split())
+                        for page in d['pages'] for block in page['blocks'])
+    assert 'ZHIXING_DOCX_CONVERSION_CHECK' in extracted
 
 
 @pytest.mark.parametrize('mode',['conflict','leak','invalid_citation','timeout'])

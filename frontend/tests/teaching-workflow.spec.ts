@@ -53,6 +53,7 @@ test('上传原文、Agent出题、教师作业、整组提交、手动错题诊
     for(let i=0;i<exercises.entries.length;i++){
       const entry=exercises.entries[i];
       await student.getByRole('button',{name:`切换第${i+1}题`,exact:true}).click();
+      await expect(student.getByText(entry.attempt.question.prompt,{exact:true}).first()).toBeVisible();
       // Teacher view supplies the answer key for this automated regression only.
       // The student progress/attempt APIs must not expose it before submission.
       expect(entry.attempt.question.answer==null).toBeTruthy();
@@ -61,13 +62,18 @@ test('上传原文、Agent出题、教师作业、整组提交、手动错题诊
       for(const answer of marking.question.answer){await student.getByRole('checkbox').nth(Object.keys(entry.attempt.question.options).indexOf(answer)).check();}
       await student.getByRole('textbox',{name:'思考过程',exact:true}).fill('重新核对原文条件与全部选项后作答。');
       await student.getByRole('button',{name:'保存草稿',exact:true}).click();
+      await expect.poll(async()=>{const saved=await data(student,'/attempts/'+entry.attempt.id);return [...saved.answer].sort()}).toEqual([...marking.question.answer].sort());
     }
-    await student.getByRole('button',{name:'提交整组练习',exact:true}).click();await expect(student.getByText('整组已提交',{exact:true})).toBeVisible();
+    const submitted=student.waitForResponse(r=>r.url().endsWith('/practice-groups/'+personal.output.practice_id+'/submit')&&r.request().method()==='POST');
+    await student.getByRole('button',{name:'提交整组练习',exact:true}).click();
+    const submissionResponse=await submitted;expect(submissionResponse.ok(),await submissionResponse.text()).toBeTruthy();
+    await expect(student.getByText('整组已提交',{exact:true})).toBeVisible();
     const result=(await data(student,'/mistake-diagnoses')).find((m:any)=>m.id===multiple.id);
     expect(result.resolved).toBeTruthy();expect(result.practice_results[0].independent_correct).toBe(3);
     report.checks.push('personal practice submitted; independent correct evidence and review schedules');
     // Verify all delivery stages are real in live mode, with no controlled provider allowed.
     if(live)expect(report.runs.every((r:any)=>r.model!=='controlled-browser-provider')).toBeTruthy();
+    if(process.env.ZX_NATIVE_TEACHING_E2E==='1')expect(report.runs.every((r:any)=>r.model.startsWith('deeptutor:')&&r.metrics.provider==='DeepTutor')).toBeTruthy();
     await student.screenshot({path:`../.runtime/${live?'real':'controlled'}-targeted-practice.png`,fullPage:true});
     await student.setViewportSize({width:390,height:844});await expect(student.getByText('整组已提交',{exact:true})).toBeVisible();expect(await student.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBeTruthy();
     report.checks.push('manual diagnosis and new practice; private question bank; mobile layout');expect(errors).toEqual([]);

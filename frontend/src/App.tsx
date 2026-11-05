@@ -28,6 +28,7 @@ function Login() {
       if(registering) await apiV2('/auth/register','POST',{...values,username:values.username.trim()});
       else await api('/auth/login','POST',{username:values.username.trim(),password:values.password});
       const user = await api<User>('/me');
+      await client.cancelQueries({queryKey:['me'],exact:true});
       setCsrf(user.csrf_token);
       client.removeQueries({predicate:q=>q.queryKey[0]!=='me'});
       client.setQueryData(['me'],user);
@@ -42,9 +43,9 @@ function Login() {
     <div className="login-note"><BookOutlined aria-hidden/> 考研政治 · 原创示例课程</div>
   </div><div className="login-form"><div className="login-box"><Tag color="green">学习工作台</Tag><h2>{registering?'开始自主学习':'欢迎回来'}</h2><p className="muted">{registering?'创建个人空间，无需先加入教师班级。':'登录后继续你的学习与教学工作。'}</p>
     <Form layout="vertical" onFinish={login} initialValues={{username:'student'}} requiredMark={false}>
-      <Form.Item name="username" label="账号" rules={[{required:true,message:'请输入账号'}]}><Input size="large" prefix={<UserOutlined aria-hidden/>} autoComplete="username"/></Form.Item>
-      {registering&&<Form.Item name="name" label="称呼" rules={[{required:true,whitespace:true,message:'请输入称呼'}]}><Input size="large" maxLength={80}/></Form.Item>}
-      <Form.Item name="password" label="密码" rules={[{required:true,message:'请输入密码'}]}><Input.Password size="large" autoComplete="current-password" placeholder="请输入密码"/></Form.Item>
+      <Form.Item name="username" label="账号" rules={[{required:true,message:'请输入账号'},...(registering?[{pattern:/^\s*[A-Za-z0-9_-]{3,60}\s*$/,message:'账号须为 3 至 60 个字母、数字、下划线或连字符'}]:[])]}><Input size="large" prefix={<UserOutlined aria-hidden/>} autoComplete="username"/></Form.Item>
+      {registering&&<Form.Item key="register-name" name="name" label="称呼" rules={[{required:true,whitespace:true,message:'请输入称呼'}]}><Input size="large" maxLength={80}/></Form.Item>}
+      <Form.Item key="auth-password" name="password" label="密码" rules={[{required:true,message:'请输入密码'},...(registering?[{min:10,max:128,message:'密码须为 10 至 128 个字符'}]:[])]}><Input.Password size="large" autoComplete={registering?'new-password':'current-password'} placeholder={registering?'至少 10 个字符':'请输入密码'}/></Form.Item>
       <Button type="primary" block size="large" htmlType="submit" loading={busy}>{registering?'创建个人学习空间':'进入工作台'} <ArrowRightOutlined aria-hidden/></Button>
     </Form>
     <Button type="link" onClick={()=>setRegistering(!registering)}>{registering?'已有账号，返回登录':'没有账号？开始自主学习'}</Button>

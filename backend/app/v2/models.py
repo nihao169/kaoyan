@@ -32,8 +32,35 @@ class Material(Entity, Base):
     title: Mapped[str] = mapped_column(String(200))
     text: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
+    original_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_version_id: Mapped[str | None] = mapped_column(ForeignKey('source_versions.id'), nullable=True)
     state: Mapped[str] = mapped_column(String(20), default='ready')
+
+
+class TutorIndex(Entity, Base):
+    __tablename__ = 'v2_tutor_indexes'
+    __table_args__ = (UniqueConstraint('material_id', 'sha256'), Index('ix_v2_tutor_index_queue', 'state', 'next_at'))
+    material_id: Mapped[str] = mapped_column(ForeignKey('v2_materials.id'))
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    sha256: Mapped[str] = mapped_column(String(64))
+    principal: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(60))
+    state: Mapped[str] = mapped_column(String(20), default='queued')
+    next_at: Mapped[str] = mapped_column(String(40))
+    error: Mapped[str] = mapped_column(Text, default='')
+
+
+class TutorTeachingIndex(Entity, Base):
+    __tablename__ = 'v2_tutor_teaching_indexes'
+    __table_args__ = (UniqueConstraint('membership_id', 'version_id', 'sha256'),
+                      Index('ix_tutor_teaching_index_queue', 'state', 'next_at'))
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    version_id: Mapped[str] = mapped_column(ForeignKey('source_versions.id'))
+    sha256: Mapped[str] = mapped_column(String(64))
+    principal: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(60))
+    state: Mapped[str] = mapped_column(String(20), default='indexing')
+    next_at: Mapped[str] = mapped_column(String(40))
 
 
 class Plan(Entity, Base):
@@ -121,7 +148,9 @@ class AIRun(Entity, Base):
     task_id: Mapped[str | None] = mapped_column(ForeignKey('v2_tasks.id'), nullable=True)
     scope_revision: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(30))
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     prompt: Mapped[str] = mapped_column(Text)
+    backend: Mapped[str] = mapped_column(String(30), default='bounded_chat', server_default='bounded_chat')
     state: Mapped[str] = mapped_column(String(25), default='queued')
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default='')

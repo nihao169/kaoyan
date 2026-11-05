@@ -39,8 +39,10 @@ def rows(db, cls, project_id):
 
 
 def no_active_mock(db, project_id):
-    if db.scalar(select(m.Assessment.id).where(m.Assessment.project_id == project_id, m.Assessment.mode == 'mock', m.Assessment.state == 'active')):
-        fail(403, 'MOCK_RESTRICTION', '模考期间暂停本项目助教、原文学习和解析，请先交卷')
+    space_id = select(m.Project.space_id).where(m.Project.id == project_id).scalar_subquery()
+    if db.scalar(select(m.Assessment.id).join(m.Project, m.Project.id == m.Assessment.project_id)
+                 .where(m.Project.space_id == space_id, m.Assessment.mode == 'mock', m.Assessment.state == 'active').limit(1)):
+        fail(403, 'MOCK_RESTRICTION', '模考期间暂停助教、原文学习和解析，请先交卷')
 
 
 def material_access(db, ctx, material):
@@ -130,10 +132,11 @@ def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qua
         kind = 'delayed_pass'
     evidence(db, p, t, kind, q.knowledge, correct=correct, hint_used=assisted, evaluator=evaluator,
              question_id=q.id, confidence=attempt.confidence, qualified=qualified)
+    scope = {key: t.payload[key] for key in ('focus', 'source_span') if t.payload.get(key)}
     if not independent:
         add_task(db, p, 'remediation', f'补学：{q.knowledge}', f'remediate:{t.id}',
                  '回到原文，辨析错误，再用未做过的新题验证', q.material_id,
-                 {'knowledge': q.knowledge, 'origin_question_id': q.id, 'origin_task_id': t.id})
+                 {**scope, 'knowledge': q.knowledge, 'origin_question_id': q.id, 'origin_task_id': t.id})
     else:
         if t.kind == 'review':
             sequence = t.payload.get('sequence', 1)
@@ -148,12 +151,12 @@ def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qua
             anchor = clock()
             add_task(db, p, 'review', f'复习：{q.knowledge}', f'review:{t.id}:1',
                      '独立通过后第 1 天的延迟检查', q.material_id,
-                     {'knowledge': q.knowledge, 'cycle': t.id, 'sequence': 1, 'anchor': anchor.isoformat(), 'exclude_question_id': q.id},
+                     {**scope, 'knowledge': q.knowledge, 'cycle': t.id, 'sequence': 1, 'anchor': anchor.isoformat(), 'exclude_question_id': q.id},
                      (anchor + timedelta(days=1)).isoformat())
         if attempt.confidence == 'low':
             add_task(db, p, 'verification', f'再检查：{q.knowledge}', f'confidence:{t.id}',
                      '本次答对但信心不足，用另一道题检查稳定性', q.material_id,
-                     {'knowledge': q.knowledge, 'exclude_question_id': q.id})
+                     {**scope, 'knowledge': q.knowledge, 'exclude_question_id': q.id})
     return attempt.result
 
 

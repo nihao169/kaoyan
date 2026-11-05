@@ -85,9 +85,15 @@ test('个人注册不依赖教师班级',async({page})=>{
   await page.getByRole('button',{name:'没有账号？开始自主学习'}).click();
   await page.getByLabel('账号',{exact:true}).fill('browser_'+Date.now());
   await page.getByLabel('称呼',{exact:true}).fill('自主学习者');
-  await page.getByLabel('密码',{exact:true}).fill('Personal2026!');
+  await page.getByLabel('密码',{exact:true}).fill('123456');
   await page.getByRole('button',{name:'创建个人学习空间'}).click();
-  await expect(page.getByRole('heading',{name:'今天，从这里继续'})).toBeVisible();
+  await expect(page.getByText('密码须为 10 至 128 个字符',{exact:true})).toBeVisible();
+  await page.getByLabel('密码',{exact:true}).fill('Personal2026!');
+  const registered=page.waitForResponse(r=>r.url().endsWith('/api/v2/auth/register')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'创建个人学习空间'}).click();
+  const response=await registered;
+  expect(response.status(),await response.text()).toBe(201);
+  await expect(page.getByRole('heading',{name:'今天，从这里继续'})).toBeVisible({timeout:20000});
   const classes=await page.request.get('/api/v1/classes');
   expect((await classes.json()).data).toEqual([]);
 });

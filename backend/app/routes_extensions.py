@@ -10,7 +10,7 @@ from .errors import fail, require
 from .api_common import EnvelopeRoute, idempotent, no_active_diagnostic, entity
 from .content import version_access, audit
 from .learning import owned_attempt
-from .ai_services import AIInput, configured, completion, CAUSES
+from .ai_services import AIInput, advisory_model, configured, completion, CAUSES
 from .ai import WorkflowError
 from .config import settings
 from .documents import document_view
@@ -212,8 +212,9 @@ def create_ai(data: AIInput, request: Request, ctx=Depends(context), db=Depends(
             fail(422, 'OBJECTIVE_RULE_ONLY', '客观题由规则判分')
         if data.purpose == 'hint' and (a.status != 'draft' or data.level > a.hint_level + 1):
             fail(409, 'HINT_ORDER', '请在作答期间逐级查看提示')
-    if not configured():
-        fail(503, 'MODEL_NOT_CONFIGURED', '请在服务端 .env 填入 DeepSeek Key；当前没有真实模型结果')
+    model = advisory_model(data.purpose)
+    if not configured(model):
+        fail(503, 'MODEL_NOT_CONFIGURED', '请配置当前 AI 服务；当前没有真实模型结果')
     def create():
         if data.purpose != 'lesson':
             if data.purpose in ('hint', 'question') and a.status == 'draft':
@@ -222,7 +223,7 @@ def create_ai(data: AIInput, request: Request, ctx=Depends(context), db=Depends(
         payload['draft'] = data.purpose != 'lesson' and a.status == 'draft'
         row = m.AIRequest(org_id=ctx.org_id, owner_id=ctx.user.id, membership_id=ctx.membership.id,
             attempt_id=data.attempt_id if data.purpose != 'lesson' else None, knowledge_id=data.knowledge_id,
-            purpose=data.purpose, input=payload, model=settings.model_name)
+            purpose=data.purpose, input=payload, model=model)
         db.add(row)
         db.flush()
         db.add(m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='ai_request', resource_id=row.id))
@@ -231,7 +232,9 @@ def create_ai(data: AIInput, request: Request, ctx=Depends(context), db=Depends(
 
 
 def ai_view(row):
-    return entity(row, 'id', 'purpose', 'attempt_id', 'knowledge_id', 'state', 'model', 'result', 'error_code', 'metrics', 'created_at')
+    result = entity(row, 'id', 'purpose', 'attempt_id', 'knowledge_id', 'state', 'model', 'result', 'error_code', 'metrics', 'created_at')
+    result['metrics'] = {key: value for key, value in row.metrics.items() if key != 'external_id'}
+    return result
 
 
 @router.get('/ai/requests')
@@ -253,8 +256,8 @@ def retry_ai(run_id: str, ctx=Depends(context), db=Depends(get_db)):
         no_active_diagnostic(db, ctx)
     if row.state != 'failed':
         fail(409, 'INVALID_STATE', '仅失败任务可重试')
-    if not configured():
-        fail(503, 'MODEL_NOT_CONFIGURED', '请配置模型服务')
+    if not configured(row.model):
+        fail(503, 'MODEL_NOT_CONFIGURED', '请配置该任务使用的模型服务')
     from sqlalchemy import update
     changed = db.execute(update(m.AIRequest).where(m.AIRequest.id == row.id, m.AIRequest.state == 'failed').values(state='queued', error_code=''))
     if changed.rowcount != 1:

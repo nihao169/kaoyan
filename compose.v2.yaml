@@ -17,7 +17,7 @@ services:
       timeout: 3s
       retries: 30
   deeptutor:
-    image: ghcr.io/hkuds/deeptutor@sha256:4982ca6bf43b98431366b43d1fec674a63656db3fbe49ba18c674bb6f19196dd
+    image: ${ZX_DEEPTUTOR_IMAGE:-ghcr.io/hkuds/deeptutor@sha256:4982ca6bf43b98431366b43d1fec674a63656db3fbe49ba18c674bb6f19196dd}
     restart: unless-stopped
     entrypoint: ["python", "-m", "uvicorn", "bridge:app", "--app-dir", "/integration", "--host", "0.0.0.0", "--port", "8001"]
     environment:

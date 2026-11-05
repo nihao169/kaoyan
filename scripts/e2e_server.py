@@ -9,7 +9,14 @@ data = Path(os.environ['ZX_E2E_DATA']).resolve()
 if not data.is_relative_to(root / '.runtime'):
     raise RuntimeError('Browser test data must stay inside the workspace .runtime directory')
 data.mkdir(parents=True, exist_ok=True)
-os.environ['DATABASE_URL'] = f'sqlite:///{(data / "test.db").as_posix()}'
+database_url = os.environ.get('ZX_E2E_ISOLATED_DATABASE_URL')
+if database_url:
+    from sqlalchemy.engine import make_url
+    url = make_url(database_url)
+    if (url.get_backend_name() != 'postgresql' or url.host not in ('127.0.0.1', 'localhost') or
+            not (url.database or '').startswith('zhixing_tutor_native_')):
+        raise RuntimeError('Use a dedicated local PostgreSQL database named zhixing_tutor_native_*')
+os.environ['DATABASE_URL'] = database_url or f'sqlite:///{(data / "test.db").as_posix()}'
 os.environ['DATA_DIR'] = str(data)
 os.environ['ALLOWED_ORIGIN'] = 'http://127.0.0.1:5181'
 if os.environ.get('ZX_REAL_AI') != '1':
@@ -60,7 +67,10 @@ from app.search import encode_segments
 encode_segments('学习准备检查')
 if os.environ.get('ZX_REAL_AI') == '1':
     from app.config import settings
-    if not settings.model_api_key:
+    from app.ai_services import TUTOR_CHAT, configured
+    native_teaching = (os.environ.get('ZX_TEACHING_FLOW') == '1' and settings.deeptutor_native_teacher_questions and
+                       settings.deeptutor_structured_teacher and configured(TUTOR_CHAT))
+    if not settings.model_api_key and not native_teaching:
         raise RuntimeError('Real acceptance requires MODEL_API_KEY in server .env')
     if os.environ.get('ZX_TEACHING_FLOW') != '1':
         from attach_sample_pages import attach

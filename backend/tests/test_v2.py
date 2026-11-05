@@ -55,6 +55,62 @@ def test_full_text_citation_and_revocation(clients, monkeypatch):
     assert call(student, base+'/material-search?q=量子灯塔试验') == []
 
 
+def test_native_index_uses_authorized_version_and_cleans_revoked_copy(clients, monkeypatch):
+    import json
+    from app.config import settings
+    from app.v2 import tutor, tutor_index, worker
+
+    student, teacher, _ = clients
+    p, material, reading = setup_project(student)
+    base = '/learning-projects/' + p['id']
+    quote = '实践是检验认识真理性的唯一标准'
+    copies = {}
+    created = []
+
+    def bridge(owner, op, name, **data):
+        key = owner, name
+        if op == 'status':
+            return {'state': 'ready' if key in copies else 'missing'}
+        if op == 'create':
+            created.append(key)
+            copies[key] = data['text']
+            return {'state': 'indexing'}
+        if op == 'search':
+            assert quote in copies[key]
+            return {'state': 'ready', 'passages': [quote, '未出现在授权原文的伪造内容']}
+        assert op == 'delete'
+        copies.pop(key, None)
+        return {'state': 'deleted'}
+
+    async def execute(principal, prompt, capability, submission_id, on_event):
+        assert quote in prompt and '伪造内容' not in prompt
+        return json.dumps({'text': '按讲义回答', 'citations': [{'material_id': material['id'], 'quote': quote}]})
+
+    monkeypatch.setattr(settings, 'deeptutor_native_knowledge', True)
+    monkeypatch.setattr(tutor, 'knowledge_request', bridge)
+    monkeypatch.setattr(tutor, 'execute', execute)
+    call(teacher, base+'/tutor-index', status=404)
+    call(student, base+'/ai-runs', 'POST', {'prompt': '检验标准是什么'}, 409)
+    for _ in range(2):
+        call(student, base+'/tutor-index', 'POST', status=202)
+    assert tutor_index.tick()
+    assert call(student, base+'/tutor-index')['items'][0]['state'] == 'indexing'
+    with SessionLocal.begin() as db:
+        db.scalar(select(m.TutorIndex)).next_at = s.clock().isoformat()
+    assert tutor_index.tick() and len(created) == 1
+    assert call(student, base+'/tutor-index')['items'][0]['state'] == 'ready'
+    run = call(student, base+'/ai-runs', 'POST', {'prompt': '检验标准是什么', 'task_id':reading['id']}, 202)
+    assert worker.tick()
+    result = call(student, '/ai-runs/'+run['run_id'])['result']
+    assert result['citation_status'] == 'verified' and result['citations'][0]['quote'] == quote
+    assert 'DeepTutor 原生知识库' in result['coverage_note']
+    call(student, base+'/materials/'+material['id'], 'DELETE')
+    call(student, '/ai-runs/'+run['run_id'], status=403)
+    with SessionLocal.begin() as db:
+        db.scalar(select(m.TutorIndex)).next_at = s.clock().isoformat()
+    assert tutor_index.tick() and not copies
+
+
 def test_pdf_citation_opens_correct_original_page(clients):
     import pymupdf
     student, teacher, _ = clients

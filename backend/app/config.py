@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     deeptutor_url: str = ''
     deeptutor_bridge_secret: str = ''
     deeptutor_timeout: int = 120
+    deeptutor_native_knowledge: bool = False
+    deeptutor_native_questions: bool = False
+    deeptutor_native_teacher_questions: bool = False
+    deeptutor_native_lessons: bool = False
+    deeptutor_structured_teacher: bool = False
     frontend_dist: Path | None = None
     legacy_retrieval_enabled: bool = True
     model_input_price: float = 0.3

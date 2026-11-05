@@ -12,19 +12,25 @@ logger = logging.getLogger('zhixing.worker')
 
 def tick(include_v2=True):
     from .v2.worker import tick as v2_tick
+    from .ai_services import TUTOR_MODELS
     if include_v2 and v2_tick():
         return True
     with SessionLocal.begin() as db:
         now = m.now()
         # Recover leases; cap repeated crashes instead of retrying forever.
-        for expired in db.scalars(select(m.Job).where(m.Job.state == 'running', m.Job.lease_until < now)):
+        for expired in db.scalars(select(m.Job).where(m.Job.state == 'running', m.Job.lease_until < now).with_for_update(skip_locked=True)):
             expired.state = 'queued' if expired.attempts < 2 else 'failed'
             expired.error_code = 'WORKER_INTERRUPTED'
             if expired.kind == 'ai_request':
                 run = db.get(m.AIRequest, expired.resource_id)
+                if run.model in TUTOR_MODELS:
+                    expired.state, expired.error_code = 'failed', 'EXECUTION_UNCERTAIN'
                 run.state, run.error_code = expired.state, expired.error_code
             elif expired.kind == 'teaching_agent':
                 run = db.get(m.AgentRun, expired.resource_id)
+                if run.model in TUTOR_MODELS:
+                    expired.state, expired.error_code = 'failed', 'EXECUTION_UNCERTAIN'
+                    run.stage = '基础服务状态待核对，请人工重试'
                 run.state, run.error_code = expired.state, expired.error_code
         job = db.scalar(select(m.Job).where(m.Job.state == 'queued').order_by(m.Job.created_at))
         job_id = None

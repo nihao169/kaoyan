@@ -8,7 +8,7 @@ from .db import get_db
 from .errors import fail, require
 from .api_common import EnvelopeRoute, idempotent, entity
 from .content import version_access, parse_chunks, ensure_index, audit
-from .ai_services import configured
+from .ai_services import advisory_model, configured
 from .learning import owned_attempt, current_evaluation
 from .config import settings
 
@@ -46,7 +46,7 @@ def enable_material(db,ctx,version_id,data,request,additional=False):
         if vid==version_id:
             fail(422,'INVALID_SUPPLEMENT','原资料无需重复作为补充资料')
         w.active_source(db,ctx,vid)
-    if not configured():
+    if not configured(advisory_model('content')):
         fail(503,'MODEL_NOT_CONFIGURED','尚未配置真实模型，不能生成题目')
     activation=db.scalar(select(m.SourceActivation).where(m.SourceActivation.version_id==version_id))
     if activation and not additional:
@@ -91,7 +91,7 @@ def retry_agent(run_id: str,request: Request,ctx=Depends(context),db=Depends(get
     def retry():
         if run.state!='failed':
             return w.agent_view(run)
-        if not configured():
+        if not configured(run.model):
             fail(503,'MODEL_NOT_CONFIGURED','尚未配置模型')
         # Explicit manual retry starts a fresh bounded repair cycle. Automatic recovery resumes checkpoints.
         run.input={**run.input,'_retry':int(run.input.get('_retry',0))+1}
@@ -235,7 +235,7 @@ def diagnose(remediation_id: str,request: Request,ctx=Depends(context),db=Depend
     ev=require(current_evaluation(db,a.id),'请等待正式评价后再诊断')
     q=db.get(m.QuestionVersion,a.question_version_id)
     w.active_source(db,ctx,q.source_version_id)
-    if not configured():
+    if not configured(advisory_model('diagnosis')):
         fail(503,'MODEL_NOT_CONFIGURED','尚未配置真实模型')
     return idempotent(db,ctx,request,'diagnose:'+a.id,{},lambda:w.agent_view(w.new_run(db,ctx,'diagnosis',a.id+':'+str(ev['revision']),{},q.source_version_id,a.id)))
 
@@ -249,7 +249,7 @@ def targeted(remediation_id: str,request: Request,ctx=Depends(context),db=Depend
     w.active_source(db,ctx,q.source_version_id)
     diagnosis=require(db.scalar(select(m.AgentRun).where(m.AgentRun.attempt_id==a.id,m.AgentRun.purpose=='diagnosis',m.AgentRun.state=='succeeded').order_by(m.AgentRun.created_at.desc())),'请先完成AI诊断')
     # One practice generation per diagnosis; repeat clicks always recover the same personal group.
-    if not configured():
+    if not configured(advisory_model('targeted')):
         fail(503,'MODEL_NOT_CONFIGURED','尚未配置真实模型')
     return idempotent(db,ctx,request,'targeted:'+a.id,{},lambda:w.agent_view(w.new_run(db,ctx,'targeted',diagnosis.id,{'diagnosis_id':diagnosis.id},q.source_version_id,a.id)))
 
