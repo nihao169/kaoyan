@@ -182,7 +182,7 @@ def test_docx_parser_real_conversion(clients,document_fixture):
     # depending on the installed Windows fonts.
     extracted = ''.join(''.join(block['text'].split())
                         for page in d['pages'] for block in page['blocks'])
-    assert all(word in extracted for word in ('实际', '预设', '结果'))
+    assert 'ZHIXING_DOCX_CONVERSION_CHECK' in extracted
 
 
 @pytest.mark.parametrize('mode',['conflict','leak','invalid_citation','timeout'])
