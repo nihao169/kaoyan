@@ -48,5 +48,6 @@ def register(data: RegisterInput, response: Response, db=Depends(get_db)):
     token = secrets.token_urlsafe(48)
     db.add(m.LoginSession(token_hash=digest(token), csrf=secrets.token_urlsafe(32), membership_id=member.id,
                           expires_at=(clock() + timedelta(hours=settings.session_hours)).isoformat()))
+    db.commit()
     response.set_cookie('zx_session', token, httponly=True, secure=settings.secure_cookies, samesite='lax', max_age=settings.session_hours * 3600, path='/')
     return {'user_id': user.id}
