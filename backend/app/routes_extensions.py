@@ -10,7 +10,7 @@ from .errors import fail, require
 from .api_common import EnvelopeRoute, idempotent, no_active_diagnostic, entity
 from .content import version_access, audit
 from .learning import owned_attempt
-from .ai_services import AIInput, advisory_model, configured, completion, CAUSES
+from .ai_services import AIInput, TUTOR_CHAT, advisory_model, configured, completion, evidence_access, CAUSES
 from .ai import WorkflowError
 from .config import settings
 from .documents import document_view
@@ -231,9 +231,20 @@ def create_ai(data: AIInput, request: Request, ctx=Depends(context), db=Depends(
     return idempotent(db, ctx, request, 'ai:create', data.model_dump(), create)
 
 
+def advisory_available(db, ctx, row):
+    if row.model != TUTOR_CHAT or row.state != 'succeeded':
+        return True
+    try:
+        for version_id in row.metrics.get('authorized_versions', [item['version_id'] for item in row.result.get('sources', [])]):
+            evidence_access(db, ctx, version_id)
+    except WorkflowError:
+        return False
+    return True
+
+
 def ai_view(row):
     result = entity(row, 'id', 'purpose', 'attempt_id', 'knowledge_id', 'state', 'model', 'result', 'error_code', 'metrics', 'created_at')
-    result['metrics'] = {key: value for key, value in row.metrics.items() if key != 'external_id'}
+    result['metrics'] = {key: value for key, value in row.metrics.items() if key not in ('external_id', 'authorized_versions')}
     return result
 
 
@@ -244,7 +255,7 @@ def list_ai(attempt_id: str | None = None, ctx=Depends(context), db=Depends(get_
     stmt = select(m.AIRequest).where(m.AIRequest.owner_id == ctx.user.id, m.AIRequest.org_id == ctx.org_id)
     if attempt_id:
         stmt = stmt.where(m.AIRequest.attempt_id == attempt_id)
-    return [ai_view(r) for r in db.scalars(stmt.order_by(m.AIRequest.created_at.desc()).limit(100))]
+    return [ai_view(r) for r in db.scalars(stmt.order_by(m.AIRequest.created_at.desc()).limit(100)) if advisory_available(db, ctx, r)]
 
 
 @router.post('/ai/requests/{run_id}/retry')
@@ -316,7 +327,8 @@ def resolve_referral(referral_id: str, data: Note, ctx=Depends(context), db=Depe
 @router.get('/teacher/lessons')
 def lessons(ctx=Depends(context), db=Depends(get_db)):
     need(ctx, 'teacher')
-    return [entity(r, 'id', 'request_id', 'body', 'revision') for r in db.scalars(select(m.LessonDraft).where(m.LessonDraft.owner_id == ctx.user.id))]
+    return [entity(r, 'id', 'request_id', 'body', 'revision') for r in db.scalars(select(m.LessonDraft).where(m.LessonDraft.owner_id == ctx.user.id))
+            if advisory_available(db, ctx, db.get(m.AIRequest, r.request_id))]
 
 
 class LessonEdit(Note):
@@ -329,6 +341,8 @@ def edit_lesson(lesson_id: str, data: LessonEdit, ctx=Depends(context), db=Depen
     row = require(db.get(m.LessonDraft, lesson_id))
     if row.owner_id != ctx.user.id:
         fail(404, 'NOT_FOUND', '教案不存在')
+    if not advisory_available(db, ctx, db.get(m.AIRequest, row.request_id)):
+        fail(403, 'ACCESS_REVOKED', '教案引用的资料已撤回')
     from sqlalchemy import update
     result = db.execute(update(m.LessonDraft).where(m.LessonDraft.id == row.id, m.LessonDraft.revision == data.revision).values(body=data.text, revision=data.revision+1))
     if result.rowcount != 1:
@@ -385,7 +399,7 @@ def learning_chain(attempt_id: str, ctx=Depends(context), db=Depends(get_db)):
         verification = db.scalar(select(m.Attempt).where(m.Attempt.task_id == remediation.verification_task_id))
         if verification:
             related.append(verification.id)
-    from .workflows import agent_view, grading_view
+    from .workflows import visible_agents, grading_view
     practices = []
     from .learning import current_evaluation
     for practice in db.scalars(select(m.TargetedPractice).where(m.TargetedPractice.origin_attempt_id==original.id)):
@@ -398,9 +412,9 @@ def learning_chain(attempt_id: str, ctx=Depends(context), db=Depends(get_db)):
         practices.append({'id':practice.id,'state':practice.state,'attempts':entries})
     reviews = list(db.scalars(select(m.ReviewSchedule).where(m.ReviewSchedule.attempt_id.in_(related))))
     return {'remediation': entity(remediation, 'id', 'cause', 'cause_status') if remediation else None,
-            'agents': [agent_view(r) for r in db.scalars(select(m.AgentRun).where(m.AgentRun.attempt_id==original.id).order_by(m.AgentRun.created_at))],
+            'agents': visible_agents(db, ctx, db.scalars(select(m.AgentRun).where(m.AgentRun.attempt_id==original.id).order_by(m.AgentRun.created_at))),
             'practices': practices,
             'verification': entity(verification, 'id', 'status', 'answer', 'response_text', 'hint_level') if verification else None,
             'reviews': [entity(r, 'stage', 'due_at', 'state', 'task_id') for r in reviews],
-            'ai': [ai_view(r) for r in db.scalars(select(m.AIRequest).where(m.AIRequest.attempt_id.in_(related)))],
+            'ai': [ai_view(r) for r in db.scalars(select(m.AIRequest).where(m.AIRequest.attempt_id.in_(related))) if advisory_available(db, ctx, r)],
             'events': [entity(e, 'kind', 'payload', 'created_at') for e in db.scalars(select(m.LearningEvent).where(m.LearningEvent.attempt_id.in_(related)).order_by(m.LearningEvent.created_at))]}

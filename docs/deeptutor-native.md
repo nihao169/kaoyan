@@ -15,11 +15,12 @@ docker build --pull=false -t zhixing-deeptutor-native:1.7.1 integrations/deeptut
 ```powershell
 .venv/Scripts/python.exe scripts/verify-native-knowledge.py .runtime/tutor-native-preview-<id>
 .venv/Scripts/python.exe scripts/verify-native-knowledge.py .runtime/tutor-native-preview-<id> --lessons
+.venv/Scripts/python.exe scripts/verify-native-knowledge.py .runtime/tutor-native-preview-<id> --student
 .venv/Scripts/python.exe scripts/verify-native-questions.py .runtime/tutor-native-preview-<id>
 powershell -ExecutionPolicy Bypass -File scripts/test-v2-postgres.ps1
 ```
 
-探针验证原生传输、题目结构和授权引文。另用隔离 PostgreSQL 和预览入口验收学生作答、模考、复习以及教师布置作业、批阅和发布成绩。只有两端完整流程通过，才可备份 5183 的数据库和原件，再按下表顺序启用。默认所有开关关闭。
+探针默认使用全新的 SQLite 库；也可将 `ZX_NATIVE_ACCEPTANCE_DATABASE_URL` 设为本机独立的 `zhixing_tutor_native_*` PostgreSQL 库。教师浏览器验收使用 `ZX_E2E_ISOLATED_DATABASE_URL` 指向另一个同样命名的空库，启用教师两项开关和知识库，设置 `ZX_REAL_AI=1`、`ZX_NATIVE_TEACHING_E2E=1`，执行 `npm --prefix frontend run test:e2e`。只有两端完整流程通过，才可备份 5183 的数据库和原件，再按下表顺序启用。默认所有开关关闭。
 
 | 环境变量 | 生效范围 |
 |---|---|

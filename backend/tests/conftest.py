@@ -22,8 +22,11 @@ def environment(tmp_path, monkeypatch, request):
     if os.environ.get('V2_TEST_DATABASE_URL'):
         from sqlalchemy.engine import make_url
         url = os.environ['V2_TEST_DATABASE_URL']
-        if make_url(url).database != 'zhixing_v2_test':
-            raise RuntimeError('V2_TEST_DATABASE_URL must target the isolated zhixing_v2_test database')
+        import re
+        parsed = make_url(url)
+        if (parsed.get_backend_name() != 'postgresql' or parsed.host not in ('127.0.0.1', 'localhost') or
+                not re.fullmatch(r'zhixing_v2_test(?:_[a-z0-9]{1,24})?', parsed.database or '')):
+            raise RuntimeError('V2_TEST_DATABASE_URL must target an isolated local zhixing_v2_test database')
     engine = database.make_engine(url)
     monkeypatch.setattr(database, 'engine', engine)
     monkeypatch.setattr(settings, 'database_url', url)

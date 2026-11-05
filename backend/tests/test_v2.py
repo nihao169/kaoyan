@@ -330,6 +330,37 @@ def test_worker_generated_question_validation_and_feedback(clients, monkeypatch)
     assert call(student,f'/study-sessions/{practice}')['result']['correct']
 
 
+@pytest.mark.parametrize('registration', [False, True])
+def test_login_cookie_is_sent_after_session_commit(environment, registration):
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    committed = []
+    observed = []
+
+    async def capture(scope, receive, send):
+        async def check_response(message):
+            if message['type'] == 'http.response.start' and any(name == b'set-cookie' for name, _ in message['headers']):
+                observed.append(bool(committed))
+            await send(message)
+        await app(scope, receive, check_response)
+
+    def after_commit(session):
+        committed.append(True)
+
+    event.listen(Session, 'after_commit', after_commit)
+    try:
+        with TestClient(capture) as client:
+            if registration:
+                call(client, '/auth/register', 'POST', {'username':'cookie_'+uuid4().hex[:10],
+                     'name':'注册验收','password':'Personal2026!'}, 201)
+            else:
+                assert client.post('/api/v1/auth/login', json={'username':'teacher','password':'Zhixing2026!'}).status_code == 200
+    finally:
+        event.remove(Session, 'after_commit', after_commit)
+    assert observed == [True]
+
+
 def test_personal_registration_without_class(environment):
     with TestClient(app) as client:
         username='personal_'+uuid4().hex[:10]

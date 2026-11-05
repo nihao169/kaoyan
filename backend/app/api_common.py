@@ -41,7 +41,9 @@ def idempotent(db, ctx, request: Request, operation, body, callback):
         return existing.result
     result = callback()
     db.add(m.IdempotencyRecord(membership_id=ctx.membership.id, operation=operation, key=key, digest=digest, result=result))
-    db.flush()
+    # A successful command and its deduplication record must be durable before
+    # the browser can request the created resource or the worker can act on it.
+    db.commit()
     return result
 
 

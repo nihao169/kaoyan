@@ -45,6 +45,9 @@ def login(data: s.LoginInput, request: Request, response: Response, db=Depends(g
     db.add(session)
     db.flush()
     db.add(m.AuditEvent(org_id=members[0].org_id, actor_id=user.id, action='auth.login', resource_id=session.id))
+    # A client can send its first authenticated request as soon as it receives
+    # Set-Cookie. The session must already be visible on another connection.
+    db.commit()
     response.set_cookie('zx_session', token, httponly=True, secure=settings.secure_cookies, samesite='lax', max_age=settings.session_hours * 3600, path='/')
     return {'user_id': user.id}
 
@@ -52,6 +55,7 @@ def login(data: s.LoginInput, request: Request, response: Response, db=Depends(g
 @router.post('/auth/logout')
 def logout(response: Response, ctx=Depends(context), db=Depends(get_db)):
     db.delete(ctx.session)
+    db.commit()
     response.delete_cookie('zx_session', path='/')
     return {'logged_out': True}
 

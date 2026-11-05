@@ -169,7 +169,10 @@ try:
                        '正确的认识能够促进实践，错误的认识会阻碍实践。认识过程具有反复性和无限性。真理是具体的、有条件的。')
         notes = call(path+'/materials', 'POST', {'title':'实践与认识', 'text':source_text}, expected=201)
         wait_index(path)
-        for kind in ('single', 'multiple', 'essay'):
+        kinds = [arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--student-kind=')]
+        if any(kind not in ('single', 'multiple', 'essay') for kind in kinds):
+            raise ValueError('Unsupported --student-kind')
+        for kind in kinds or ('single', 'multiple', 'essay'):
             with SessionLocal.begin() as db:
                 project_row = db.get(m.Project, study['id'])
                 task = s.add_task(db, project_row, 'practice', '原生出题：'+kind, 'preview:'+kind, '验收练习', notes['id'],

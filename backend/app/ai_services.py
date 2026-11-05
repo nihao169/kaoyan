@@ -65,7 +65,7 @@ def advisory_model(purpose):
     return settings.model_name
 
 
-def advisory_completion(model, principal, request_id, prompt, metrics, max_tokens=4096):
+def advisory_completion(model, principal, request_id, prompt, metrics, max_tokens=4096, *, on_event=None):
     if model not in TUTOR_MODELS:
         return completion(prompt, metrics, max_tokens=max_tokens)
     from .v2 import tutor
@@ -82,16 +82,17 @@ def advisory_completion(model, principal, request_id, prompt, metrics, max_token
         if isinstance(turn_id, str):
             metrics['external_id'] = turn_id
         tutor.accumulate_usage(metrics, event)
-        return False
+        return bool(on_event and on_event(event))
 
     try:
-        result = asyncio.run(tutor.execute_turn(principal, content, 'chat', f'{request_id}:{attempt}', record))
-        data = tutor.json_result(result.text)
-        if not isinstance(data, dict):
+        data = asyncio.run(tutor.structured_chat(principal, content, f'{request_id}:{attempt}', record))
+        if not data:
             raise ValueError('expected an object')
         return data
     except tutor.TutorError as exc:
         raise WorkflowError('DEEPTUTOR_EXECUTION_FAILED') from exc
+    except TimeoutError as exc:
+        raise WorkflowError('DEEPTUTOR_TIMEOUT') from exc
     except (ValueError, IndexError) as exc:
         raise WorkflowError('MODEL_OUTPUT_INVALID') from exc
     finally:
@@ -202,6 +203,8 @@ def process_request(request_id):
         model_name = run.model
         principal = f'v1:advisory:{ctx.user.id}:{ctx.membership.id}:{run.id}'
         metrics = dict(run.metrics)
+        if model_name == TUTOR_CHAT:
+            metrics['authorized_versions'] = sorted({item['version_id'] for item in evidence})
     if model_name not in (settings.model_name, TUTOR_CHAT):
         raise WorkflowError('MODEL_CONFIGURATION_CHANGED')
     def tracked_completion(prompt):

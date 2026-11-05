@@ -25,7 +25,7 @@ def processing(version_id: str,ctx=Depends(context),db=Depends(get_db)):
     activation=db.scalar(select(m.SourceActivation).where(m.SourceActivation.version_id==version_id))
     return {'enabled':bool(activation),'parsed':not doc or doc.state=='parsed','document_state':doc.state if doc else 'parsed',
         'chapters':[entity(c,'position','heading') for c in db.scalars(select(m.SourceChunk).where(m.SourceChunk.version_id==version_id).order_by(m.SourceChunk.position))],
-        'runs':[w.agent_view(r) for r in runs],'version_status':version.status}
+        'runs':w.visible_agents(db,ctx,runs),'version_status':version.status}
 
 
 def enable_material(db,ctx,version_id,data,request,additional=False):
@@ -53,7 +53,7 @@ def enable_material(db,ctx,version_id,data,request,additional=False):
         existing=db.scalar(select(m.AgentRun).where(m.AgentRun.source_version_id==version_id,
             m.AgentRun.purpose=='content').order_by(m.AgentRun.created_at))
         if existing:
-            return w.agent_view(existing)
+            return w.agent_view(w.require_current_agent_sources(db,ctx,existing))
     if not activation:
         db.add(m.SourceActivation(version_id=version_id,org_id=ctx.org_id,teacher_id=ctx.user.id))
         version.status='published'

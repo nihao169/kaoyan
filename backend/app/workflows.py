@@ -51,24 +51,39 @@ def agent_view(run):
     return result
 
 
+def require_current_agent_sources(db, ctx, run):
+    from .ai_services import TUTOR_MODELS
+    if run.model in TUTOR_MODELS and run.state == 'succeeded':
+        owner = run_context(db, run)
+        for version_id in [run.source_version_id, *run.input.get('supplement_ids', [])]:
+            active_source(db, owner, version_id)
+            if ctx.membership.id != owner.membership.id:
+                active_source(db, ctx, version_id)
+    return run
+
+
+def visible_agents(db, ctx, runs):
+    from fastapi import HTTPException
+    result = []
+    for run in runs:
+        try:
+            result.append(agent_view(require_current_agent_sources(db, ctx, run)))
+        except HTTPException:
+            continue
+    return result
+
+
 def run_access(db, ctx, run_id):
     run = require(db.get(m.AgentRun, run_id))
     if run.org_id != ctx.org_id:
         fail(404, 'NOT_FOUND', '任务不存在')
-    def current_result():
-        from .ai_services import TUTOR_MODELS
-        if run.model in TUTOR_MODELS and run.state == 'succeeded':
-            owner = run_context(db, run)
-            for version_id in [run.source_version_id, *run.input.get('supplement_ids', [])]:
-                active_source(db, owner, version_id)
-        return run
     if run.membership_id == ctx.membership.id:
-        return current_result()
+        return require_current_agent_sources(db, ctx, run)
     if run.purpose == 'content' and ctx.has('teacher'):
         version_access(db, ctx, run.source_version_id)
-        return current_result()
+        return require_current_agent_sources(db, ctx, run)
     if run.attempt_id and teacher_can_view(db, ctx, db.get(m.Attempt, run.attempt_id).membership_id):
-        return current_result()
+        return require_current_agent_sources(db, ctx, run)
     fail(404, 'NOT_FOUND', '任务不存在或无权访问')
 
 

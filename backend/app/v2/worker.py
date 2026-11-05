@@ -148,6 +148,9 @@ def tick():
                     '\n生成一道全新题，符合考研政治命题方式，考查：' + knowledge
                     + '。必须给出支持参考答案的逐字原文 kaoyan_quote。分析题给出评分要点 kaoyan_rubric。'
                     + '\n避免复用以下题干：' + json.dumps(previous_questions, ensure_ascii=False))
+                exact_options = tutor.quote_options(hit.text for hit in hits)
+                if exact_options:
+                    prompt += '\n请以一句支持答案的引文为命题依据。kaoyan_quote 原样复制以下数组中的一项，不添加引号或改写：' + json.dumps(exact_options, ensure_ascii=False)
             if capability == 'deep_solve':
                 prompt += '\n请逐步解释解题方法、容易混淆的选项和知识点；以下是已交卷的题目及作答：\n' + solve_context
             turn_options = {}
@@ -202,7 +205,13 @@ def tick():
             text = asyncio.run(tutor.execute(principal, prompt, capability, run_id, on_event))
         if kind == 'question' and text:
             validation_prompt = prompt.split('生成一道全新题', 1)[0] + '\n请独立校验下面候选题的答案、选项唯一性和原文支持是否成立。只输出JSON对象：valid(布尔),reason(说明)。候选题：\n' + text
-            validation = tutor.json_result(asyncio.run(tutor.execute(principal, validation_prompt, 'chat', run_id + ':validate', on_event)))
+            try:
+                if native_questions:
+                    validation = asyncio.run(tutor.structured_chat(principal, validation_prompt, run_id + ':validate', on_event))
+                else:
+                    validation = tutor.json_result(asyncio.run(tutor.execute(principal, validation_prompt, 'chat', run_id + ':validate', on_event)))
+            except (ValueError, IndexError) as exc:
+                raise tutor.TutorError('QUESTION_REVIEW_INVALID：独立核对没有返回可验证的结构，题目未进入题库') from exc
             if validation.get('valid') is not True:
                 raise tutor.TutorError('QUESTION_REVIEW_FAILED：独立校验未通过，题目未进入可用题库')
         with SessionLocal.begin() as db:
@@ -290,7 +299,9 @@ def tick():
             elif run.state == 'running':
                 run.state = 'failed'
                 run.lease_until = None
-                run.error = str(exc)[:500] if isinstance(exc, tutor.TutorError) else 'AI_EXECUTION_FAILED：本次生成未完成，原始资料与作答已保留'
+                run.error = (str(exc)[:500] if isinstance(exc, tutor.TutorError) else
+                    'DEEPTUTOR_TIMEOUT：基础服务超时，未自动重发' if isinstance(exc, TimeoutError) else
+                    'AI_EXECUTION_FAILED：本次生成未完成，原始资料与作答已保留')
                 event(db, run_id, 'failed', {'message': run.error})
                 logger.warning('ai_failed run=%s project=%s kind=%s error=%s', run.id, run.project_id, run.kind, type(exc).__name__)
     return True

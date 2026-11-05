@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import re
 import time
 from dataclasses import dataclass, field
 import httpx
@@ -90,8 +91,15 @@ async def execute_turn(principal, prompt, capability, submission_id, on_event, *
                         'tools':[], 'client_submission_id':submission_id, 'auto_route':False,
                         'knowledge_bases':list(knowledge_bases), 'config':config or {}, **context}
                     await ws.send(json.dumps({**command,'protocol_version':'2.0'}))
-                    async for raw in ws:
-                        event = json.loads(raw)
+                    while True:
+                        try:
+                            event = json.loads(await asyncio.wait_for(ws.recv(), timeout=3))
+                        except TimeoutError:
+                            if turn_id and not cancel_sent and on_event({'type': 'heartbeat', 'turn_id': turn_id}):
+                                await ws.send(json.dumps({'type':'cancel_turn','protocol_version':'2.0',
+                                                          'turn_id':turn_id,'command_id':submission_id + ':cancel'}))
+                                cancel_sent = True
+                            continue
                         turn_id = event.get('turn_id') or turn_id
                         seq = event.get('seq')
                         if isinstance(seq, int) and seq > 0:
@@ -155,6 +163,18 @@ def lesson_text(capability, turn):
 QUESTION_TYPES = {'single': 'choice', 'multiple': 'multiple_choice', 'essay': 'written'}
 
 
+def quote_options(excerpts):
+    candidates = {}
+    for excerpt in excerpts:
+        for sentence in re.findall(r'[^\r\n。！？]+[。！？]?', excerpt):
+            sentence = sentence.strip()
+            if 8 <= len(sentence) <= 360:
+                candidates[sentence] = None
+            if len(candidates) == 24:
+                return list(candidates)
+    return list(candidates)
+
+
 async def generate_questions(principal, prompt, counts, submission_id, on_event, *, knowledge_bases=()):
     native_counts = {QUESTION_TYPES[kind]: count for kind, count in counts.items() if count}
     turn = await execute_turn(principal, prompt, 'deep_question', submission_id, on_event,
@@ -189,3 +209,18 @@ def json_result(text):
     if text.startswith('```'):
         text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
     return json.loads(text)
+
+
+async def structured_chat(principal, prompt, submission_id, on_event):
+    turn = await execute_turn(principal, prompt, 'chat', submission_id, on_event)
+    for candidate in (turn.text, turn.result.get('response')):
+        if isinstance(candidate, str) and candidate.strip():
+            try:
+                data = json_result(candidate)
+                if isinstance(data, dict):
+                    return data
+            except (ValueError, IndexError):
+                pass
+    if not turn.text and not turn.result:
+        return {}  # cancelled downstream
+    raise ValueError('DeepTutor did not return a JSON object')
