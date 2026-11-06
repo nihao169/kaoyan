@@ -88,6 +88,9 @@ def current_run(db, run_id, states=('running',)):
 
 
 def tick():
+    from . import mastery_reviews
+    if mastery_reviews.tick():
+        return True
     if tutor_index.tick() or tutor_teaching_index.tick():
         return True
     # AIRun is the durable queue for V2 interactive tasks. A lost execution is not

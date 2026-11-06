@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from collections import Counter
 import math
 import re
+from ..citation_text import quote_offset
 from ..config import settings
 
 WORDS = re.compile(r'[a-z0-9]+|[\u3400-\u9fff]+', re.I)
@@ -90,7 +91,7 @@ def verify(sent, current, quote, material_id=None):
         if (not material or material.sha256 != chunk.material.sha256 or
                 (material_id is not None and mid != material_id)):
             continue
-        offset = chunk.text.find(quote)
+        offset = quote_offset(chunk.text, quote)
         if offset >= 0:
             start = chunk.start+offset
             return {**location(material, start, start+len(quote)), 'quote': quote}

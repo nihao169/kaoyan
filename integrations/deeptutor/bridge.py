@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -78,6 +79,177 @@ class LearningRecord(BaseModel):
     body: str = Field(min_length=1, max_length=300000)
     material_id: str | None
     created_at: str
+
+
+class ReviewEvidence(Assertion):
+    scope_id: str = Field(pattern=r'^[a-f0-9-]{32,36}$')
+    attempt_id: str = Field(pattern=r'^[a-f0-9-]{32,36}$')
+    revision: int = Field(ge=1)
+    objective_id: str = Field(pattern=r'^[a-f0-9-]{32,64}$')
+    objective: str = Field(min_length=1, max_length=250)
+    title: str = Field(min_length=1, max_length=250)
+    knowledge_base: str = Field(pattern=r'^zx_[a-f0-9]{48}$')
+    timestamp: float = Field(gt=0, allow_inf_nan=False)
+    correct: bool
+
+
+@app.post('/internal/mastery-evidence')
+def mastery_evidence(data: ReviewEvidence, x_zhixing_signature: str = Header(default='')):
+    from deeptutor.learning.models import (
+        KnowledgePoint, KnowledgeType, LearningEvidence, LearningModule, QuizAttempt, TopicMetadata, TopicSource,
+    )
+    from deeptutor.learning.review_strategy import scheduler_for_progress
+    from deeptutor.learning.service import LearningService
+    from deeptutor.learning.storage import LearningStore
+    from deeptutor.multi_user.models import CurrentUser
+    from deeptutor.multi_user.paths import scope_for_user, user_context
+
+    check_assertion(data, x_zhixing_signature)
+    username, user_id = execution_user(data.principal)
+    user = CurrentUser(id=user_id, username=username, role='user', scope=scope_for_user(user_id, is_admin=False))
+    path_id = 'topic_zx_' + data.scope_id.replace('-', '')
+    point_id = 'kp_zx_' + data.objective_id.replace('-', '')
+    attempt_id = 'zx:' + data.attempt_id
+    source_id = 'source_zx_' + data.scope_id.replace('-', '')
+    source = TopicSource(id=source_id, kind='knowledge_base', source_id=data.knowledge_base, label=data.title)
+    point = KnowledgePoint(id=point_id, name=data.objective, type=KnowledgeType.MEMORY,
+                           module_id='zhixing', topic_source_ids=[source_id])
+    with user_context(user):
+        store = LearningStore()
+        service = LearningService(store)
+
+        def apply(tx):
+            progress = tx.progress
+            previous = next((e for e in progress.learning_evidence if e.question_id == attempt_id), None)
+            if previous and int(previous.evidence_id.rsplit(':', 1)[1]) >= data.revision:
+                return
+            if previous and previous.knowledge_point_id != point_id:
+                raise HTTPException(409, 'Evidence cannot move between objectives')
+            if not progress.modules:
+                progress.name = data.title
+                tx.put_topic(TopicMetadata(path_id=path_id, goal=data.title), [source])
+                service.replace_modules(progress, [
+                    LearningModule(id='zhixing', name=data.title, order=0, knowledge_points=[point]),
+                ])
+                progress.current_module_id = 'zhixing'
+            elif point_id not in progress.knowledge_types:
+                module = progress.modules[0]
+                module.knowledge_points.append(point)
+                progress.knowledge_types[point_id] = point.type
+
+            if previous:
+                progress.quiz_attempts = [item for item in progress.quiz_attempts if item.question_id != attempt_id]
+                progress.learning_evidence.remove(previous)
+                progress.error_records = [item for item in progress.error_records if item.question_id != attempt_id]
+            service.record_quiz_attempt(progress, QuizAttempt(
+                question_id=attempt_id, knowledge_point_id=point_id, module_id='zhixing',
+                is_correct=data.correct, timestamp=data.timestamp,
+            ))
+            progress.learning_evidence.append(LearningEvidence(
+                evidence_id=f'{attempt_id}:{data.revision}', question_id=attempt_id,
+                knowledge_point_id=point_id, timestamp=data.timestamp, source='zhixing',
+                result='correct' if data.correct else 'incorrect', quality=1.0 if data.correct else 0.0,
+            ))
+            progress.quiz_attempts.sort(key=lambda item: (item.timestamp, item.question_id))
+            progress.learning_evidence.sort(key=lambda item: (item.timestamp, item.evidence_id))
+            service._recompute_objective_state(progress, point_id, scheduler_for_progress(progress))
+            tx.emit('evidence.recorded', {'evidence_id': f'{attempt_id}:{data.revision}', 'source': 'zhixing'})
+
+        store.mutate(path_id, apply, create=True)
+    return {'path_id': path_id, 'revision': data.revision}
+
+
+class ReviewSession(Assertion):
+    path_id: str = Field(pattern=r'^topic_zx_[a-f0-9]{32}$')
+    operation: Literal['status', 'start', 'answer']
+    submission_id: str = Field(max_length=80)
+    answer: str = Field(max_length=12000)
+    expected_id: str = Field(max_length=150)
+    answers: dict[str, str] = Field(max_length=4)
+
+
+@app.post('/internal/mastery-review-session')
+async def mastery_review_session(data: ReviewSession, x_zhixing_signature: str = Header(default='')):
+    from deeptutor.api.routers.mastery_path import _read_projection, _review_queue
+    from deeptutor.app.facade import DeepTutorApp
+    from deeptutor.learning.pending import public_pending_question
+    from deeptutor.learning.storage import LearningStore
+    from deeptutor.multi_user.models import CurrentUser
+    from deeptutor.multi_user.paths import scope_for_user, user_context
+    from deeptutor.services.session import get_session_store
+    from deeptutor.services.workspace.context import workspace_context
+
+    check_assertion(data, x_zhixing_signature)
+    username, user_id = execution_user(data.principal)
+    user = CurrentUser(id=user_id, username=username, role='user', scope=scope_for_user(user_id, is_admin=False))
+    session_id = 'zx_review_' + data.path_id.removeprefix('topic_zx_')
+    command_id = hashlib.sha256(f'{session_id}:{data.submission_id}'.encode()).hexdigest()
+    starter = '请按照当前 Mastery Path 的复习队列，发起一次到期知识点的复习检验。'
+    with user_context(user), workspace_context(None):
+        store = LearningStore()
+        progress = store.load(data.path_id)
+        native_topic = store.get_topic(data.path_id, progress=progress) if progress else None
+        if not progress or not native_topic:
+            raise HTTPException(404, 'Mastery Path unavailable')
+        client = DeepTutorApp()
+        session = await client.get_session(session_id)
+        active = await client.get_active_turn(session_id)
+        pending = progress.pending_question
+        if data.operation == 'start' and not active and not pending:
+            if not any(row['due'] for row in _review_queue(_read_projection(progress))):
+                raise HTTPException(409, 'No native review is due')
+            if not session:
+                try:
+                    await get_session_store().create_session('知行研学 · 复习', session_id=session_id)
+                except sqlite3.IntegrityError:
+                    if not await client.get_session(session_id):
+                        raise
+            await client.start_turn({
+                'session_id': session_id, 'client_submission_id': command_id,
+                'content': starter, 'capability': 'mastery_path', 'language': 'zh', 'auto_route': False,
+                'mastery_path_id': data.path_id, 'workspace_mode': 'mastery_path', 'mastery_session_mode': 'review',
+                'knowledge_bases': [source.source_id for source in native_topic.sources],
+            })
+        elif data.operation == 'answer':
+            current = pending.question_id if pending else active['turn_id'] if active else ''
+            if not current or current != data.expected_id or not (data.answer.strip() or data.answers):
+                raise HTTPException(409, 'Review question changed')
+            if active:
+                if active['status'] != 'waiting_input':
+                    raise HTTPException(409, 'Native review is still running')
+                accepted = await client.turns.submit_user_reply(active['turn_id'], text=data.answer, command_id=command_id)
+                if not accepted:
+                    raise HTTPException(409, 'Native review is no longer waiting for a reply')
+            else:
+                if pending is None or bool(pending.questions) != bool(data.answers):
+                    raise HTTPException(409, 'Review card answer format changed')
+                children = {child.question_id for child in pending.questions}
+                if not data.answers.keys() <= children or any(not value.strip() or len(value) > 8000 for value in data.answers.values()):
+                    raise HTTPException(422, 'Invalid review card answers')
+                answer = data.answer if not data.answers else '\n'.join(data.answers.values())
+                await client.start_turn({
+                    'session_id': session_id, 'client_submission_id': command_id,
+                    'content': answer, 'capability': 'mastery_path', 'language': 'zh', 'auto_route': False,
+                    'mastery_path_id': data.path_id, 'workspace_mode': 'mastery_path', 'mastery_session_mode': 'review',
+                    'knowledge_bases': [source.source_id for source in native_topic.sources],
+                    'mastery_answer': {'question_id': pending.question_id, 'text': answer, 'answers': data.answers or None},
+                })
+        active = await client.get_active_turn(session_id)
+        progress = store.load(data.path_id)
+        pending = progress.pending_question
+        session = await client.get_session(session_id)
+        messages = session.get('messages', []) if session else []
+        feedback = ''
+        if not active and not pending and messages and messages[-1].get('role') == 'assistant':
+            latest_user = next((item for item in reversed(messages) if item.get('role') == 'user'), {})
+            if latest_user.get('content') != starter:
+                feedback = str(messages[-1].get('content', ''))[:20000]
+        return {
+            'state': active['status'] if active else 'question' if pending else 'idle',
+            'request_id': pending.question_id if pending else active['turn_id'] if active else '',
+            'question': public_pending_question(pending).to_dict() if pending else None,
+            'feedback': feedback,
+        }
 
 
 class RecordsAssertion(Assertion):

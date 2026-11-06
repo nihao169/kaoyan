@@ -6,6 +6,7 @@ import { ArrowRightOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icon
 import { api, apiV2, key, type Catalog } from './api';
 import { Blank, PageTitle, State, useRun } from './ui';
 import { CitationList, ExamResources, MaterialSearch, type Citation } from './v2-resources';
+import { MasteryReviewQueue } from './mastery-reviews';
 import './v2.css';
 
 type Task = {id:string;project_id:string;project_title?:string;title:string;kind:string;reason:string;state:string;estimated_minutes:number;due_at?:string};
@@ -31,7 +32,7 @@ function TaskList({tasks}:{tasks:Task[]}) {
 
 export function TodayV2() {
   const query = useQuery({queryKey:['v2-today'],queryFn:()=>apiV2<{tasks:Task[];deferred:Task[];projects:number;estimated_minutes:number}>('/today')});
-  return <><PageTitle title="今天，从这里继续" description="学一点，试一试，再用证据决定下一步。" action={<Link to="/learning/projects"><Button icon={<PlusOutlined aria-hidden/>}>创建学习项目</Button></Link>}/><State query={query}>{query.data&&<>
+  return <><PageTitle title="今天，从这里继续" description="学一点，试一试，再用证据决定下一步。" action={<Link to="/learning/projects"><Button icon={<PlusOutlined aria-hidden/>}>创建学习项目</Button></Link>}/><MasteryReviewQueue dueOnly/><State query={query}>{query.data&&<>
     <div className="v2-overview"><div><span>今日安排</span><strong>{query.data.estimated_minutes}<small> 分钟</small></strong></div><div><span>可执行任务</span><strong>{query.data.tasks.length}</strong></div><div><span>进行中的项目</span><strong>{query.data.projects}</strong></div></div>
     {query.data.tasks.length?<><div className="v2-section-heading"><h2>你的下一步</h2><span>每项安排都有原因</span></div><TaskList tasks={query.data.tasks}/></>:<Blank description="还没有今日任务。选择一门课程或添加资料，就能开始。"><Link to="/learning/projects"><Button type="primary">开始我的学习</Button></Link></Blank>}
     {!!query.data.deferred.length&&<Alert type="info" message={`${query.data.deferred.length} 项任务超出今日预算`} description="这些任务仍保留在项目中。可以调整学习时间，或先完成今天的重点。"/>}
@@ -189,7 +190,7 @@ function NotesPanel({projectId,disabled=false}:{projectId:string;disabled?:boole
   </article>)}</State></>;
 }
 
-type StudyData = {task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string;native_solve?:boolean;native_lessons?:boolean};
+type StudyData = {task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string;native_solve?:boolean;native_lessons?:boolean;archived_review?:boolean};
 
 export function StudyV2() {
   const {taskId}=useParams();
@@ -203,7 +204,7 @@ function StudyContent({data}:{data:StudyData}) {
   const [revision,setRevision]=useState(data.revision);const [confidence,setConfidence]=useState('normal');
   const [prompt,setPrompt]=useState('');const [runId,setRunId]=useState<string|undefined>(data.ai_run_id||data.result?.run_id);const [hint,setHint]=useState('');
   const [readingQuestion,setReadingQuestion]=useState('');
-  const t=data.task;const closed=['completed','cancelled'].includes(t.state)||!!data.result;
+  const t=data.task;const closed=['completed','cancelled'].includes(t.state)||!!data.result||!!data.archived_review;
   const [questionKind,setQuestionKind]=useState('single');
   const ai=useQuery({queryKey:['v2-run',runId],queryFn:()=>apiV2<Run>('/ai-runs/'+runId),enabled:!!runId,refetchInterval:q=>q.state.data&&['succeeded','failed','cancelled'].includes(q.state.data.state)?false:1500});
   const refresh=useRun();

@@ -92,7 +92,8 @@ def retry_agent(run_id: str,request: Request,ctx=Depends(context),db=Depends(get
     def retry():
         if run.state!='failed':
             return w.agent_view(run)
-        if not configured(run.model):
+        model = advisory_model(run.purpose) if settings.deeptutor_unified_execution and run.model not in TUTOR_MODELS else run.model
+        if not configured(model):
             fail(503,'MODEL_NOT_CONFIGURED','尚未配置模型')
         recovering = run.model in TUTOR_MODELS and run.error_code in (
             'DEEPTUTOR_TIMEOUT', 'DEEPTUTOR_RECONNECT_FAILED', 'WORKER_INTERRUPTED', 'EXECUTION_UNCERTAIN')
@@ -104,6 +105,10 @@ def retry_agent(run_id: str,request: Request,ctx=Depends(context),db=Depends(get
         values = {'state':'queued', 'error_code':'', 'stage':'等待恢复原运行' if recovering else '等待重试'}
         if not recovering:
             values['input'] = {**run.input,'_retry':int(run.input.get('_retry',0))+1}
+            if model != run.model:
+                values['model'] = model
+                values['input']['_native_retrieval'] = True
+                values['metrics'] = {}
         claimed = db.execute(update(m.AgentRun).where(m.AgentRun.id == run.id, m.AgentRun.state == 'failed').values(**values))
         db.refresh(run)
         if claimed.rowcount != 1:

@@ -2,8 +2,12 @@
 from collections.abc import Callable
 
 
+def matches_answer(expected: list[str], actual: list[str]) -> bool:
+    return set(expected) == set(actual)
+
+
 def exact_set(expected: list[str], actual: list[str], max_score: int) -> int:
-    return max_score if set(expected) == set(actual) else 0
+    return max_score if matches_answer(expected, actual) else 0
 
 
 STRATEGIES: dict[tuple[str, int], Callable[[list[str], list[str], int], int]] = {

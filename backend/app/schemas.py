@@ -198,6 +198,7 @@ class AttemptOutput(BaseModel):
     grading_state: str = '未提交'
     ai_suggestion: dict | None = None
     group_url: str | None = None
+    archived_review: bool = False
 
 
 class TaskOutput(BaseModel):

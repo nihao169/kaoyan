@@ -3,6 +3,7 @@ import asyncio
 
 from ..config import settings
 from ..errors import fail
+from ..scoring import matches_answer
 from . import tutor
 
 
@@ -53,7 +54,7 @@ async def grade(user_id, project_id, question, answer):
                                         body={'answer': ','.join(answer)}, timeout=8)
     if type(result.get('correct')) is not bool:
         raise tutor.TutorError('原生练习未返回有效判分')
-    if result['correct'] != (set(answer) == set(question.answer)):
+    if result['correct'] != matches_answer(question.answer, answer):
         raise tutor.TutorError('原生判分与考研客观题规则不一致')
     return result['correct']
 

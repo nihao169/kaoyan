@@ -280,10 +280,17 @@ def retry_ai(run_id: str, ctx=Depends(context), db=Depends(get_db)):
         no_active_diagnostic(db, ctx)
     if row.state != 'failed':
         fail(409, 'INVALID_STATE', '仅失败任务可重试')
-    if not configured(row.model):
+    if (settings.deeptutor_unified_execution and row.model == TUTOR_CHAT and
+            row.error_code in ('EXECUTION_UNCERTAIN', 'DEEPTUTOR_TIMEOUT', 'DEEPTUTOR_RECONNECT_FAILED')):
+        fail(409, 'EXECUTION_UNCERTAIN', '请先核对已有 DeepTutor 运行状态')
+    model = advisory_model(row.purpose) if settings.deeptutor_unified_execution else row.model
+    if not configured(model):
         fail(503, 'MODEL_NOT_CONFIGURED', '请配置该任务使用的模型服务')
     from sqlalchemy import update
-    changed = db.execute(update(m.AIRequest).where(m.AIRequest.id == row.id, m.AIRequest.state == 'failed').values(state='queued', error_code=''))
+    values = {'state': 'queued', 'error_code': ''}
+    if row.model != model:
+        values.update(model=model, input={**row.input, '_native_retrieval': True}, metrics={})
+    changed = db.execute(update(m.AIRequest).where(m.AIRequest.id == row.id, m.AIRequest.state == 'failed').values(**values))
     if changed.rowcount != 1:
         fail(409, 'INVALID_STATE', '任务已被重试')
     db.refresh(row)

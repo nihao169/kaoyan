@@ -320,6 +320,7 @@ def session(task_id: str, ctx=Depends(context), db=Depends(get_db)):
     latest_run = db.scalar(select(m.AIRun).where(m.AIRun.task_id == t.id, m.AIRun.scope_revision == p.scope_revision)
                            .order_by(m.AIRun.created_at.desc(), m.AIRun.id.desc()).limit(1))
     return {'task': task_view(t), 'project': project_view(p), 'material': material_view,
+            'archived_review': t.kind == 'review' and settings.deeptutor_mastery_reviews,
             'native_solve': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
             'native_lessons': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
             'checkpoint': row.checkpoint if row else {}, 'revision': row.revision if row else 0,
@@ -676,10 +677,20 @@ def events(run_id: str, request: Request, after: int = 0, ctx=Depends(context), 
 def retry(run_id: str, request: Request, ctx=Depends(context), db=Depends(get_db)):
     previous = authorized_run(db, ctx, run_id)
     p = s.project(db, ctx, previous.project_id, lock=True)
-    if previous.state != 'failed':
-        fail(409, 'RETRY_NOT_ALLOWED', '仅失败运行可以显式重试')
     def save():
-        row = create_run(db, p, previous.kind, previous.prompt, previous.task_id, ctx.membership.id, previous.backend)
+        db.refresh(previous)
+        if previous.state != 'failed':
+            fail(409, 'RETRY_NOT_ALLOWED', '仅失败运行可以显式重试')
+        if settings.deeptutor_unified_execution and previous.error.startswith((
+                'EXECUTION_UNCERTAIN', 'DEEPTUTOR_RECONNECT_FAILED', 'DEEPTUTOR_TIMEOUT', 'CANCEL_UNCERTAIN')):
+            if (previous.external_id and previous.backend != 'bounded_chat' and
+                    previous.kind in ('chat', 'read', 'solve', 'evaluate') and not previous.error.startswith('CANCEL_UNCERTAIN')):
+                previous.state, previous.error, previous.lease_until = 'queued', '', None
+                previous.metrics = {**previous.metrics, 'recovery_attempts': 1}
+                return {'run_id': previous.id, 'state': previous.state}
+            fail(409, 'EXECUTION_UNCERTAIN', '请先核对已有 DeepTutor 运行状态')
+        row = create_run(db, p, previous.kind, previous.prompt, previous.task_id, ctx.membership.id,
+                         None if settings.deeptutor_unified_execution else previous.backend)
         return {'run_id': row.id, 'state': row.state}
     return idempotent(db, ctx, request, f'v2.retry:{previous.id}', {}, save)
 

@@ -140,6 +140,28 @@ class Note(Entity, Base):
     material_id: Mapped[str | None] = mapped_column(ForeignKey('v2_materials.id'), nullable=True)
 
 
+class MasteryReviewScope(Entity, Base):
+    __tablename__ = 'v2_mastery_review_scopes'
+    __table_args__ = (UniqueConstraint('owner_id', 'kind', 'resource_id'),)
+    owner_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    membership_id: Mapped[str] = mapped_column(ForeignKey('memberships.id'))
+    kind: Mapped[str] = mapped_column(String(8))
+    resource_id: Mapped[str] = mapped_column(String(36))
+    path_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class MasteryReviewEvent(Entity, Base):
+    __tablename__ = 'v2_mastery_review_events'
+    __table_args__ = (UniqueConstraint('scope_id', 'attempt_id'),
+                      Index('ix_mastery_review_pending', 'state', 'next_at'))
+    scope_id: Mapped[str] = mapped_column(ForeignKey('v2_mastery_review_scopes.id'))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    revision: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict] = mapped_column(JSON)
+    state: Mapped[str] = mapped_column(String(20))
+    next_at: Mapped[str] = mapped_column(String(40))
+
+
 class AIRun(Entity, Base):
     __tablename__ = 'v2_ai_runs'
     __table_args__ = (Index('ix_v2_ai_run_queue', 'state', 'created_at'), Index('ix_v2_ai_run_lease', 'state', 'lease_until'))

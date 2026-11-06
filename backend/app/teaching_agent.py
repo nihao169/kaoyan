@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from .citation_text import quote_offset
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -36,7 +37,7 @@ def check_citations(records, evidence):
     allowed = {e['chunk_id']:e['text'] for e in evidence}
     for cite in records:
         cid, quote = cite['chunk_id'], cite['quote']
-        if cid not in allowed or re.sub(r'\s+','',quote) not in re.sub(r'\s+','',allowed[cid]):
+        if quote_offset(allowed.get(cid, ''), quote, ignore_whitespace=not settings.deeptutor_unified_execution) < 0:
             raise ValueError('引用必须逐字出自实际提供的教师原文')
 
 
@@ -469,7 +470,7 @@ def run_agent(run_id):
                     if not isinstance(extra_evidence, list) or len(extra_evidence) > 2:
                         raise WorkflowError('MODEL_OUTPUT_INVALID')
                     citations = [ws.CitationInput.model_validate(cite).model_dump() for cite in extra_evidence]
-                    if any(cite['quote'] not in available.get(cite['chunk_id'], '') for cite in citations):
+                    if any(quote_offset(available.get(cite['chunk_id'], ''), cite['quote']) < 0 for cite in citations):
                         raise ValueError('补充引文必须逐字出自实际提供的教师原文')
                     fields['evidence'] = item['evidence'] + [cite for cite in citations if cite not in item['evidence']]
                     fields['rubric'] = []

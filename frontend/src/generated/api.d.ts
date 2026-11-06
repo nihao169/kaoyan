@@ -2208,6 +2208,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/mastery-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Queue */
+        get: operations["queue_api_v2_mastery_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/mastery-reviews/{scope_id}/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Status */
+        get: operations["session_status_api_v2_mastery_reviews__scope_id__session_get"];
+        put?: never;
+        /** Session Action */
+        post: operations["session_action_api_v2_mastery_reviews__scope_id__session_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2378,6 +2413,11 @@ export interface components {
             } | null;
             /** Group Url */
             group_url?: string | null;
+            /**
+             * Archived Review
+             * @default false
+             */
+            archived_review: boolean;
         };
         /** Body_replace_original_api_v1_documents__version_id__original_post */
         Body_replace_original_api_v1_documents__version_id__original_post: {
@@ -3044,6 +3084,30 @@ export interface components {
              * @default 180
              */
             minutes: number;
+        };
+        /** ReviewAction */
+        ReviewAction: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "start" | "answer";
+            /** Submission Id */
+            submission_id: string;
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /**
+             * Expected Id
+             * @default
+             */
+            expected_id: string;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            };
         };
         /** ReviewCaseOutput */
         ReviewCaseOutput: {
@@ -14344,6 +14408,245 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    queue_api_v2_mastery_reviews_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    session_status_api_v2_mastery_reviews__scope_id__session_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scope_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: unknown;
+                        request_id: string;
+                    };
+                };
+            };
+            /** @description 标准错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+            /** @description 标准错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIErrorEnvelope"];
+                };
+            };
+        };
+    };
+    session_action_api_v2_mastery_reviews__scope_id__session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scope_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewAction"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

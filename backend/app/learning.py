@@ -4,6 +4,7 @@ from . import models as m
 from .auth import Context, teacher_can_view
 from .errors import fail, require
 from .content import available_questions, version_access, retrieve, audit
+from .config import settings
 from .scoring import score as score_answer
 from .api_common import no_active_diagnostic
 
@@ -56,6 +57,7 @@ def attempt_view(db, ctx, a, teacher=False):
               'duration_seconds': a.duration_seconds, 'hint_level': a.hint_level, 'revision': a.revision,
               'question': question_view(q, reveal), 'evaluation': current_evaluation(db, a.id) if reveal else None,
               'content_status': version.status, 'remediation_id': remediation.id if remediation else None,
+              'archived_review': task.mode == 'review' and settings.deeptutor_mastery_reviews,
               'submitted_at': a.submitted_at}
     from .workflows import grading_view, task_group_url
     result.update(grading_view(db, ctx, a))
@@ -70,6 +72,7 @@ def create_attempt(db, ctx, task_id):
     existing = db.scalar(select(m.Attempt).where(m.Attempt.membership_id == ctx.membership.id, m.Attempt.task_id == task.id))
     if existing:
         return existing
+    require_active_review_task(task)
     attempt = m.Attempt(membership_id=ctx.membership.id, task_id=task.id, question_version_id=q.id)
     db.add(attempt)
     db.flush()
@@ -90,6 +93,7 @@ def validate_answer(q, data):
 def save_draft(db, ctx, attempt_id, data):
     a = owned_attempt(db, ctx, attempt_id)
     task, q = owned_task(db, ctx, a.task_id)
+    require_active_review_task(task)
     if a.status != 'draft':
         fail(409, 'ALREADY_SUBMITTED', '提交后原始作答不能修改')
     validate_answer(q, data)
@@ -110,6 +114,7 @@ def submit_attempt(db, ctx, attempt_id, group_submit=False):
     if a.status != 'draft':
         return a
     task, q = owned_task(db, ctx, a.task_id)
+    require_active_review_task(task)
     if (q.kind == 'essay' and not a.response_text.strip()) or (q.kind != 'essay' and not a.answer):
         fail(422, 'ANSWER_REQUIRED', '请先保存答案再提交')
     state = 'pending_teacher' if q.kind == 'essay' else 'graded'
@@ -137,7 +142,14 @@ def submit_attempt(db, ctx, attempt_id, group_submit=False):
     return a
 
 
+def require_active_review_task(task):
+    if task.mode == 'review' and settings.deeptutor_mastery_reviews:
+        fail(409, 'NATIVE_REVIEW_ENABLED', '此记录已归入历史，请从 Mastery Path 复习入口开始')
+
+
 def add_review(db, a, knowledge_id, stage=1, anchor=None):
+    if settings.deeptutor_mastery_reviews:
+        return
     existing = db.scalar(select(m.ReviewSchedule).where(m.ReviewSchedule.attempt_id == a.id, m.ReviewSchedule.stage == stage))
     if existing and existing.state != 'cancelled':
         return
@@ -154,6 +166,9 @@ def derive_outcome(db, ctx, a):
     evaluation = current_evaluation(db, a.id)
     if not evaluation:
         return
+    if settings.deeptutor_mastery_reviews:
+        from .v2.mastery_reviews import enqueue_v1
+        enqueue_v1(db, ctx, a, q, evaluation)
     correct = evaluation['score'] == q.max_score and a.hint_level == 0
     if not correct:
         remediation = db.scalar(select(m.Remediation).where(m.Remediation.attempt_id == a.id))
@@ -302,6 +317,8 @@ def task_view(db, task):
 
 
 def materialize_review(db, ctx, schedule):
+    if settings.deeptutor_mastery_reviews:
+        fail(409, 'NATIVE_REVIEW_ENABLED', '此记录已归入历史，请从 Mastery Path 复习入口开始')
     if schedule.task_id:
         return schedule.task_id
     if schedule.state != 'scheduled' or schedule.due_at > m.now():

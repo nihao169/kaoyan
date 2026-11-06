@@ -52,4 +52,15 @@ powershell -ExecutionPolicy Bypass -File scripts/test-v2-postgres.ps1 -Database 
 - `DEEPTUTOR_TEACHER_BANK_ORGS` 接收以空格分隔的机构 ID，默认空。教师题库使用独立的机构级原生目录，知行仍按教师角色、资料可见范围和题目状态过滤后才查询和返回。新旧题目版本仍由知行区分，已布置作业继续读取发布时的版本。
 - 设置学习记录名单后，由项目所有者调用 `POST /api/v2/learning-projects/{project_id}/notes/migrate`。每次最多向下游写入 25 条，全部比对通过才把项目标为已迁移。下游超时后可重跑。移出名单会暂停已迁项目的写入，读取仍走原生。等当前写入请求结束，再由所有者调用同路径下的 `/notes/restore`，完整核对并导回新增记录后恢复本地写入。
 - 项目答疑历史使用原运行的会话和轮次标识，返回知行核对过的正文与引用。以前未保存原生会话标识的记录直接读取历史结果。资料范围变化或有活跃模考时沿用知行的访问限制。
-- 隔离预览以最新桥接代码启动，运行 `scripts/verify-native-knowledge.py <preview> --phase2 --student --lessons`。该探针核对真实原生题库、客观题判分、笔记迁移、闪卡、会话读取和导回。教师目录试点需另过机构级隔离验收。原生复习调度需通过固定锚点语义验证后再开放。
+- 隔离预览以最新桥接代码启动，运行 `scripts/verify-native-knowledge.py <preview> --phase2 --student --lessons`。该探针核对真实原生题库、客观题判分、笔记迁移、闪卡、会话读取和导回。教师目录试点需另过机构级隔离验收。复习迁移使用下节的独立验收流程。
+
+## 统一执行与 Mastery Path 复习切换
+
+`DEEPTUTOR_UNIFIED_EXECUTION=true` 统一新 AI 任务的执行后端，并停用旧检索初始化。现有历史保留，仍有已绑定的旧任务时先按原后端排空，再清理对应执行代码。全文查询和原文定位继续由知行提供。
+
+`DEEPTUTOR_MASTERY_REVIEWS` 默认关闭。开启后，学生首页和复习页读取原生 Mastery Path 队列，V1/V2 的本地复习安排保留为历史。原生掌握门槛和排期可能使历史任务的到期时间变化。学生的正式成绩仍由知行维护。
+
+1. 在隔离预览加载最新版桥接，运行 `scripts/verify-mastery-reviews.py <preview>`，核对重复投递、教师评价修订、达到原生门槛后的队列、题面和真实作答后的排期。
+2. 使用专用 `zhixing_tutor_native_*` PostgreSQL、独立资料目录与 DeepTutor 数据卷，执行 Alembic 升级，再运行 `scripts/replay-mastery-reviews.py --deliver-seconds 300`。脚本按原始时间导入并输出对账计数，可重复执行。先查明所有待投递和失败路径，再用隔离浏览器验证两代作答和复习。
+3. 通过隔离验收后，暂停发布写入，协调备份发布数据库、原件和 DeepTutor 数据。在显式配置发布数据库与下游服务后，以 `--release` 运行重放并核对增量。确认旧复习执行已排空后，运行 `scripts/start-release-v2.ps1 -MasteryReviews`。启动成功后保存切换标记，正常重启继续使用原生队列。核对学生页面和投递队列。
+4. 出现故障时暂停该范围的写入和复习入口，保留待同步证据及原生进度。恢复服务前检查路由和开关，避免把已迁移范围重新交给旧版排程。

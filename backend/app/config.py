@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,11 +32,24 @@ class Settings(BaseSettings):
     deeptutor_practice_projects: str = ''
     deeptutor_teacher_bank_orgs: str = ''
     deeptutor_records_projects: str = ''
+    deeptutor_unified_execution: bool = False
+    deeptutor_mastery_reviews: bool = False
     frontend_dist: Path | None = None
     legacy_retrieval_enabled: bool = True
     model_input_price: float = 0.3
     model_output_price: float = 1.2
     model_price_version: str = 'deepseek-flash-2026-10-28-peak-USD-estimate'
+
+    @model_validator(mode='after')
+    def unified_tutor(self):
+        if self.deeptutor_unified_execution:
+            self.deeptutor_native_knowledge = True
+            self.deeptutor_native_questions = True
+            self.deeptutor_native_teacher_questions = True
+            self.deeptutor_native_lessons = True
+            self.deeptutor_structured_teacher = True
+            self.legacy_retrieval_enabled = False
+        return self
 
     @property
     def native_teaching_pipeline(self) -> bool:

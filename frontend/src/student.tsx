@@ -7,6 +7,7 @@ import { ArrowRightOutlined, CheckCircleOutlined, ClockCircleOutlined, FileTextO
 import { api, key, kindName, ApiError, type Attempt, type Catalog, type Contracts, type DraftInput, type Evaluation, type GoalInput, type Task } from './api';
 import { useUser } from './App';
 import { Blank, PageTitle, Sources, State, Status, date, useRun } from './ui';
+import { MasteryReviewHistory, MasteryReviewQueue, useMasteryReviews } from './mastery-reviews';
 
 type Plan = Contracts['PlanOutput'];
 type Diag = Contracts['DiagnosticOutput'];
@@ -181,7 +182,7 @@ function AttemptEditor({initial,onReload,registerSave}:{initial:Attempt;onReload
     return()=>window.removeEventListener('beforeunload',warn);
   },[dirty]);
   const q=attempt.question;
-  const editable=attempt.status==='draft';
+  const editable=attempt.status==='draft'&&!attempt.archived_review;
   async function submit(){
     await run(async()=>{
       await save();
@@ -218,14 +219,15 @@ export function Mistakes() {
 
 export function Reviews() {
   const query=useQuery({queryKey:['reviews'],queryFn:()=>api<Review[]>('/review-schedules')});
+  const native=useMasteryReviews().data?.enabled;
   const {run,busy}=useRun();
   const navigate=useNavigate();
-  return <><PageTitle title="复习计划" description="独立验证后，按第 1、3、7 天逐步巩固。到期前不提前计为完成。"/><State query={query}>
+  return <><PageTitle title={native?'复习与历史':'复习计划'} description={native?'查看 DeepTutor 的复习安排和历史记录。':'独立验证后，按第 1、3、7 天逐步巩固。到期前不提前计为完成。'}/><MasteryReviewQueue/>{native&&<h2>历史复习记录</h2>}<State query={query}>
     {!query.data?.length?<Blank description="完成独立验证后，复习安排将出现在这里。"/>:<Table rowKey="id" dataSource={query.data} scroll={{x:700}} pagination={{pageSize:10}} columns={[
       {title:'知识点',dataIndex:'knowledge'},{title:'阶段',dataIndex:'stage',render:v=>`第 ${v} 阶段`},{title:'安排时间',dataIndex:'due_at',render:date},{title:'状态',render:(_,r)=><><Status value={r.state}/>{r.due&&r.state==='scheduled'&&<Tag color="orange">已到期</Tag>}</>},
-      {title:'操作',render:(_,r)=><Button disabled={!r.task_id&&(!r.due||r.state!=='scheduled')} loading={busy} onClick={()=>run(async()=>{const result=await api<{task_id:string}>('/review-schedules/'+r.id+'/attempts','POST');navigate('/study/'+result.task_id);return result})}>{r.task_id?'查看复习':'开始复习'}</Button>},
+      {title:'操作',render:(_,r)=>r.task_id?<Link to={'/study/'+r.task_id}><Button>查看记录</Button></Link>:native?'已归档':<Button disabled={!r.due||r.state!=='scheduled'} loading={busy} onClick={()=>run(async()=>{const result=await api<{task_id:string}>('/review-schedules/'+r.id+'/attempts','POST');navigate('/study/'+result.task_id);return result})}>开始复习</Button>},
     ]}/>}
-  </State><Alert type="info" showIcon message="旧题重做与新题验证分别记录" description="复习可以重做原题；补学验证会优先使用尚未作答的新题。"/></>;
+  </State>{native?<MasteryReviewHistory/>:<Alert type="info" showIcon message="旧题重做与新题验证分别记录" description="复习可以重做原题；补学验证会优先使用尚未作答的新题。"/>}</>;
 }
 
 export function History() {

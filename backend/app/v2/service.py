@@ -5,7 +5,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from .. import models as old
 from ..auth import source_allowed
+from ..config import settings
 from ..errors import fail
+from ..scoring import matches_answer
 from . import models as m
 
 
@@ -80,6 +82,8 @@ def task(db, ctx, task_id, lock=False, active=True, assessment=False):
         db.refresh(row)
     if row.payload.get('assessment_id') and not assessment:
         fail(403, 'ASSESSMENT_ONLY', '请在本次测评中作答和查看反馈')
+    if active and row.kind == 'review' and settings.deeptutor_mastery_reviews:
+        fail(409, 'NATIVE_REVIEW_ENABLED', '此任务已归入历史，请从 Mastery Path 复习入口开始')
     if row.material_id:
         material_access(db, ctx, db.get(m.Material, row.material_id))
     return row, p
@@ -134,7 +138,7 @@ def question_view(q, reveal=False):
     return value
 
 
-def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qualified=True):
+def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qualified=True, membership_id=None):
     attempt.result = {'correct': correct, 'feedback': feedback, 'evaluator': evaluator, 'question': question_view(q, True)}
     t.state = 'completed'
     assisted = bool(attempt.hint_used)
@@ -144,13 +148,18 @@ def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qua
         kind = 'delayed_pass'
     evidence(db, p, t, kind, q.knowledge, correct=correct, hint_used=assisted, evaluator=evaluator,
              question_id=q.id, confidence=attempt.confidence, qualified=qualified)
+    if settings.deeptutor_mastery_reviews and qualified:
+        from .mastery_reviews import enqueue_v2
+        enqueue_v2(db, p, t, q, attempt, correct, membership_id)
     scope = {key: t.payload[key] for key in ('focus', 'source_span') if t.payload.get(key)}
     if not independent:
         add_task(db, p, 'remediation', f'补学：{q.knowledge}', f'remediate:{t.id}',
                  '回到原文，辨析错误，再用未做过的新题验证', q.material_id,
                  {**scope, 'knowledge': q.knowledge, 'origin_question_id': q.id, 'origin_task_id': t.id})
     else:
-        if t.kind == 'review':
+        if settings.deeptutor_mastery_reviews:
+            pass
+        elif t.kind == 'review':
             sequence = t.payload.get('sequence', 1)
             if sequence < 3:
                 anchor = datetime.fromisoformat(t.payload['anchor'])
@@ -198,9 +207,9 @@ def submit_answer(db, ctx, task_id, data, assessment=False, grader=None):
     if q.kind == 'essay':
         attempt.result = {'state': 'pending_ai', 'evaluator': 'ai_training'}
         return attempt, p, t, q
-    correct, evaluator = grader(p, q, material, data.answer) if grader else (set(data.answer) == set(q.answer), 'rule')
+    correct, evaluator = grader(p, q, material, data.answer) if grader else (matches_answer(q.answer, data.answer), 'rule')
     finish_answer(db, p, t, q, attempt, correct, '回答正确' if correct else '请核对原文和选项差异，再完成针对性补学',
-                  evaluator)
+                  evaluator, membership_id=ctx.membership.id)
     return attempt, p, t, q
 
 
@@ -213,7 +222,7 @@ def report(db, p):
         states[e.knowledge] = {'knowledge': e.knowledge, 'state': {'reading': '学习中', 'needs_remediation': '待验证',
                               'independent_pass': '已验证', 'delayed_pass': '已巩固'}.get(e.kind, '待了解'),
                               'evidence_id': e.id, 'kind': e.kind, 'created_at': e.created_at}
-    due = [t for t in rows(db, m.Task, p.id) if t.kind == 'review' and t.state not in ('completed', 'cancelled') and t.due_at and datetime.fromisoformat(t.due_at) <= clock()]
+    due = [] if settings.deeptutor_mastery_reviews else [t for t in rows(db, m.Task, p.id) if t.kind == 'review' and t.state not in ('completed', 'cancelled') and t.due_at and datetime.fromisoformat(t.due_at) <= clock()]
     for t in due:
         key = t.payload.get('knowledge')
         if key in states:
@@ -246,6 +255,8 @@ def today(db, ctx):
     for p in projects:
         spent = 0
         candidates = [t for t in rows(db, m.Task, p.id) if not t.payload.get('assessment_id') and t.state in ('todo', 'in_progress') and (not t.due_at or datetime.fromisoformat(t.due_at) <= end)]
+        if settings.deeptutor_mastery_reviews:
+            candidates = [t for t in candidates if t.kind != 'review']
         priority = {'review': 0, 'verification': 1, 'remediation': 2, 'practice': 3, 'reading': 4}
         candidates.sort(key=lambda t: (priority.get(t.kind, 5), t.due_at or '', t.created_at))
         for t in candidates:

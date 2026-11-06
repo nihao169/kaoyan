@@ -5,6 +5,7 @@ from . import models as m
 from . import schemas as s
 from . import learning as l
 from .auth import context, need
+from .config import settings
 from .content import retrieve, version_access, available_questions
 from .db import get_db
 from .errors import fail, require
@@ -69,7 +70,7 @@ def plan(ctx=Depends(student_context), db=Depends(get_db)):
     if goal:
         l.ensure_plan(db, ctx, goal.subject_id)
     active_diagnostic = db.scalar(select(m.DiagnosticSession.id).where(m.DiagnosticSession.membership_id == ctx.membership.id, m.DiagnosticSession.status == 'active'))
-    if not active_diagnostic:
+    if not active_diagnostic and not settings.deeptutor_mastery_reviews:
         for schedule in db.scalars(select(m.ReviewSchedule).where(m.ReviewSchedule.membership_id == ctx.membership.id, m.ReviewSchedule.state == 'scheduled', m.ReviewSchedule.due_at <= m.now(), m.ReviewSchedule.task_id.is_(None))):
             # Withdrawn sources are a visible content gap, not a reason to fail the entire plan.
             original = db.get(m.Attempt, schedule.attempt_id)
@@ -91,7 +92,7 @@ def plan(ctx=Depends(student_context), db=Depends(get_db)):
         emphasis = 0 if goal and goal.target_score >= 80 and analytical else 1
         return base, emphasis, task.created_at
     for task in sorted(tasks, key=daily_priority):
-        if task.state != 'todo':
+        if task.state != 'todo' or (task.mode == 'review' and settings.deeptutor_mastery_reviews):
             continue
         if task.estimated_minutes <= remaining:
             picked.append(l.task_view(db, task))
@@ -131,6 +132,7 @@ def hint(attempt_id: str, data: s.HintInput, ctx=Depends(student_context), db=De
     no_active_diagnostic(db, ctx)
     a = l.owned_attempt(db, ctx, attempt_id)
     task, q = l.owned_task(db, ctx, a.task_id)
+    l.require_active_review_task(task)
     if task.mode == 'diagnostic':
         fail(403, 'DIAGNOSTIC_RESTRICTION', '诊断不允许提示')
     if a.status != 'draft':

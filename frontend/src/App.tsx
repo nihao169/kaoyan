@@ -12,6 +12,7 @@ import { AISettings, KnowledgeStatus, Referrals, Lessons } from './extensions';
 import { StudentAssignments, TeacherAssignments, AssignmentWork, MistakeDiagnoses } from './workflows';
 import { TodayV2, ProjectsV2, ProjectV2, StudyV2, LibraryV2, ReportsV2 } from './v2';
 import { AssessmentsV2, AssessmentV2 } from './v2-assessments';
+import { MasteryReview } from './mastery-reviews';
 
 const Auth = createContext<User | null>(null);
 export function useUser() { return useContext(Auth)!; }
@@ -110,6 +111,7 @@ function Shell({user}:{user:User}) {
         <Route path="/study/:taskId" element={<Role role="student"><Study/></Role>}/>
         <Route path="/mistakes" element={<Role role="student"><MistakeDiagnoses/></Role>}/>
         <Route path="/reviews" element={<Role role="student"><Reviews/></Role>}/>
+        <Route path="/reviews/native/:scopeId" element={<Role role="student"><MasteryReview/></Role>}/>
         <Route path="/history" element={<Role role="student"><History/></Role>}/>
         <Route path="/teacher" element={<Role role="teacher"><Teacher/></Role>}/>
         <Route path="/teacher/attempts/:attemptId" element={<Role role="teacher"><TeacherAttempt/></Role>}/>
