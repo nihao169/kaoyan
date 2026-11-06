@@ -17,10 +17,13 @@ export const pendingAgent=(r:AgentRun)=>['queued','running'].includes(r.state);
 export function AgentResult({item}:{item:AgentRun}){
   const {run,busy}=useRun();
   const o=item.output;
+  const resume=['DEEPTUTOR_TIMEOUT','DEEPTUTOR_RECONNECT_FAILED','WORKER_INTERRUPTED'].includes(item.error_code)&&item.model.startsWith('deeptutor:');
+  const uncertain=item.error_code==='EXECUTION_UNCERTAIN';
+  const errorText=uncertain?'未确认 DeepTutor 是否已接收任务，请联系管理员核对。':resume?'DeepTutor 暂未返回结果，已保存进度。':errorNames[item.error_code];
   return <div className="agent-result" aria-live="polite">
     <Space wrap><Tag color={item.state==='succeeded'?'green':item.state==='failed'?'red':'processing'}>{item.stage}</Tag><span className="muted">{item.model}</span></Space>
     {pendingAgent(item)&&<p>正在处理，刷新或稍后回来可继续查看，不必重复提交。</p>}
-    {item.error_code&&<Alert type="warning" showIcon message={errorNames[item.error_code]??'处理未完成，请重试或联系教师'} description={o.issues?.join('；')}/>}
+    {item.error_code&&<Alert type="warning" showIcon message={errorText??'处理未完成，请重试或联系教师'} description={o.issues?.join('；')}/>}
     {o.explanation&&<p className="preserve-text">{o.explanation}</p>}
     {o.candidate_cause&&<p><strong>可能错因：</strong>{o.candidate_cause}</p>}
     {!!Object.keys(o.option_analysis??{}).length&&<div><h4>选项辨析</h4>{Object.entries(o.option_analysis??{}).map(([label,text])=><p key={label}><strong>{label}：</strong>{text}</p>)}</div>}
@@ -31,8 +34,8 @@ export function AgentResult({item}:{item:AgentRun}){
     {!!o.question_ids?.length&&<p>本批已校验 {o.question_ids.length} 道新题。{o.available_chunks!==undefined&&`资料共 ${o.available_chunks} 个页段，本批提取使用 ${o.sampled_chunks} 个代表页段，题目另按知识点检索依据。`}</p>}
     {!!o.sources?.length&&<Collapse items={[{key:'sources',label:'核对引用与原页',children:<Sources items={o.sources}/>}]}/>}
     {o.practice_id&&<Link to={'/practice/'+o.practice_id}><Button type="primary">开始针对性练习</Button></Link>}
-    {item.state==='failed'&&<Button loading={busy} onClick={()=>run(()=>api('/agent-runs/'+item.id+'/retry','POST',{},key()),'已提交重试')}>重试任务</Button>}
-    {!!Object.keys(item.metrics).length&&<Collapse items={[{key:'metrics',label:'查看调用记录',children:<p>调用 {Number(item.metrics.calls??0)} 次 · {(Number(item.metrics.duration_ms??0)/1000).toFixed(1)} 秒 · {Number(item.metrics.total_tokens??0)} tokens · 估算 ${Number(item.metrics.estimated_cost_usd??0).toFixed(6)}（以实际账单为准）</p>}]}/>}
+    {item.state==='failed'&&!uncertain&&<Button loading={busy} onClick={()=>run(()=>api('/agent-runs/'+item.id+'/retry','POST',{},key()),resume?'正在恢复原运行':'已提交重试')}>{resume?'恢复原运行':'重试任务'}</Button>}
+    {!!Object.keys(item.metrics).length&&<Collapse items={[{key:'metrics',label:'查看调用记录',children:<p>结构化调用 {Number(item.metrics.calls??0)} 次{item.metrics.native_calls!=null&&' · 原生出题 '+Number(item.metrics.native_calls)+' 次'} · {item.metrics.total_tokens==null?'用量未返回':Number(item.metrics.total_tokens)+' tokens'}{item.metrics.estimated_cost_usd!=null&&' · 估算 $'+Number(item.metrics.estimated_cost_usd).toFixed(6)+'（以实际账单为准）'}</p>}]}/>}
   </div>;
 }
 
@@ -40,7 +43,7 @@ type Processing={enabled:boolean;parsed:boolean;document_state:string;version_st
 type GenSettings={single:number;multiple:number;essay:number;chapters:number[];supplement_ids:string[]};
 export function GenerationPanel({versionId,teacher}:{versionId:string;teacher:boolean}){
   const query=useQuery({queryKey:['processing',versionId],queryFn:()=>api<Processing>('/content/sources/'+versionId+'/processing'),refetchInterval:q=>!q.state.data?.parsed||q.state.data.runs.some(pendingAgent)?2000:false});
-  const index=useQuery({queryKey:['index',versionId],queryFn:()=>api<{state:string}>('/content/indexes/'+versionId),refetchInterval:q=>q.state.data?.state==='ready'?false:3000});
+  const index=useQuery({queryKey:['index',versionId],queryFn:()=>api<{state:string;backend?:string}>('/content/indexes/'+versionId),refetchInterval:q=>q.state.data?.state==='ready'?false:3000});
   const sources=useQuery({queryKey:['supplements'],queryFn:()=>api<{items:{id:string;title:string;enabled:boolean}[]}>('/content/sources?page_size=100')});
   const [form]=Form.useForm<GenSettings>();
   const [expanded,setExpanded]=useState(false);
@@ -51,7 +54,7 @@ export function GenerationPanel({versionId,teacher}:{versionId:string;teacher:bo
   return <section className="panel section-space generation-panel"><div className="section-heading"><div><h2>原文与 Agent 出题</h2><p>启用一次原文，自动提取知识卡、生成题目并核对答案。无需提交审核说明。</p></div><Tag color={p?.enabled?'green':'default'}>{p?.enabled?'原文已启用':'原文未启用'}</Tag></div>
     {query.error&&<Alert type="error" message={query.error.message}/>}
     {!p?.parsed&&<Alert type="info" message="正在解析资料，请等待原页与正文准备完成"/>}
-    {p?.parsed&&index.data?.state!=='ready'&&<p>正在建立原文索引，就绪后可启用。</p>}
+    {p?.parsed&&index.data?.backend==='deeptutor'?<p>开始生成后，DeepTutor 会为本次选定的资料建立索引。</p>:p?.parsed&&index.data?.state!=='ready'&&<p>正在建立原文索引，就绪后可启用。</p>}
     {teacher&&p?.version_status!=='withdrawn'&&<Form form={form} initialValues={{single:6,multiple:4,essay:2,chapters:[],supplement_ids:[]}} onFinish={enable}>
       <Space wrap className="generation-counts">{[['single','单选题'],['multiple','多选题'],['essay','分析题']].map(([name,label])=><Form.Item key={name} name={name} label={label}><InputNumber aria-label={label} min={0} max={30} precision={0}/></Form.Item>)}</Space>
       <Form.Item noStyle shouldUpdate>{()=>{const values=form.getFieldsValue();return <p className="muted">共 {Number(values.single??0)+Number(values.multiple??0)+Number(values.essay??0)} 题，单批1至30题；数量有限，不代表覆盖整本教材。</p>}}</Form.Item>

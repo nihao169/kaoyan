@@ -107,6 +107,6 @@ def test_structured_teacher_backend_is_pinned_and_does_not_fallback(monkeypatch)
     prompt = ai.messages('评分建议必须由教师确认', {})
     assert ai.advisory_completion(model, 'teacher-scope', 'job', prompt, metrics) == {'approved': False}
     assert metrics['external_id'] == 'native-turn-123' and metrics['provider'] == 'DeepTutor'
-    with pytest.raises(WorkflowError, match='DEEPTUTOR_EXECUTION_FAILED'):
+    with pytest.raises(WorkflowError, match='EXECUTION_UNCERTAIN'):
         ai.advisory_completion(model, 'teacher-scope', 'job', prompt, metrics)
     assert calls == [('teacher-scope', 'chat', 'job:1'), ('teacher-scope', 'chat', 'job:2')]

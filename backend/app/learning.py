@@ -58,7 +58,7 @@ def attempt_view(db, ctx, a, teacher=False):
               'content_status': version.status, 'remediation_id': remediation.id if remediation else None,
               'submitted_at': a.submitted_at}
     from .workflows import grading_view, task_group_url
-    result.update(grading_view(db, a))
+    result.update(grading_view(db, ctx, a))
     result['group_url'] = task_group_url(db, task.id)
     if reveal:
         result['sources'] = retrieve(db, ctx, knowledge_id=q.knowledge_id, version_id=q.source_version_id)

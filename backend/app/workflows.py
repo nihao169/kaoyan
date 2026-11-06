@@ -2,6 +2,7 @@
 import hashlib
 import json
 from datetime import datetime, timezone
+from fastapi import HTTPException
 from sqlalchemy import select
 from . import models as m
 from .auth import Context, need, source_allowed, teacher_can_view
@@ -25,15 +26,17 @@ def active_source(db, ctx, version_id):
 
 
 def new_run(db, ctx, purpose, key, data, source_id=None, attempt_id=None):
-    from .ai_services import advisory_model
+    from .ai_services import TUTOR_MODELS, advisory_model
+    from .config import settings
 
     fingerprint = hashlib.sha256((purpose + ':' + key).encode()).hexdigest()
     previous = db.scalar(select(m.AgentRun).where(m.AgentRun.org_id == ctx.org_id, m.AgentRun.fingerprint == fingerprint))
     if previous:
         return previous
+    model = advisory_model(purpose)
     run = m.AgentRun(org_id=ctx.org_id, owner_id=ctx.user.id, membership_id=ctx.membership.id,
         purpose=purpose, source_version_id=source_id, attempt_id=attempt_id, fingerprint=fingerprint,
-        input=data, model=advisory_model(purpose))
+        input={**data, '_native_retrieval': model in TUTOR_MODELS and settings.deeptutor_native_knowledge}, model=model)
     db.add(run)
     db.flush()
     db.add(m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='teaching_agent', resource_id=run.id))
@@ -43,7 +46,7 @@ def new_run(db, ctx, purpose, key, data, source_id=None, attempt_id=None):
 def agent_view(run):
     result = {k:getattr(run,k) for k in ('id','purpose','state','stage','source_version_id','attempt_id',
             'input','output','metrics','error_code','model','workflow_version','created_at')}
-    result['metrics'] = {key: value for key, value in run.metrics.items() if key != 'external_id'}
+    result['metrics'] = {key: value for key, value in run.metrics.items() if key not in ('external_id', '_native_turns')}
     if run.purpose == 'targeted':
         # Raw generation includes answers, hints and rubrics. Reveal them only through
         # the normal attempt view after submission, never via a progress endpoint.
@@ -53,7 +56,7 @@ def agent_view(run):
 
 def require_current_agent_sources(db, ctx, run):
     from .ai_services import TUTOR_MODELS
-    if run.model in TUTOR_MODELS and run.state == 'succeeded':
+    if run.model in TUTOR_MODELS and (run.state == 'succeeded' or run.output):
         owner = run_context(db, run)
         for version_id in [run.source_version_id, *run.input.get('supplement_ids', [])]:
             active_source(db, owner, version_id)
@@ -63,7 +66,6 @@ def require_current_agent_sources(db, ctx, run):
 
 
 def visible_agents(db, ctx, runs):
-    from fastapi import HTTPException
     result = []
     for run in runs:
         try:
@@ -101,11 +103,17 @@ def run_context(db, run):
     return ctx
 
 
-def grading_view(db, attempt):
+def grading_view(db, ctx, attempt):
     from .learning import current_evaluation
     evaluation = current_evaluation(db, attempt.id)
     suggestion = db.scalar(select(m.EvaluationSuggestion).where(m.EvaluationSuggestion.attempt_id == attempt.id))
     run = db.scalar(select(m.AgentRun).where(m.AgentRun.attempt_id == attempt.id, m.AgentRun.purpose == 'initial_evaluation').order_by(m.AgentRun.created_at.desc()))
+    if suggestion:
+        suggestion_run = db.get(m.AgentRun, suggestion.run_id)
+        try:
+            require_current_agent_sources(db, ctx, suggestion_run)
+        except HTTPException:
+            suggestion, run = None, None
     if attempt.status == 'draft':
         state = '未提交'
     elif evaluation:
@@ -122,7 +130,7 @@ def grading_view(db, attempt):
     if suggestion:
         result['ai_suggestion'] = {'parts':suggestion.parts, 'score':sum(suggestion.parts),
             'feedback':suggestion.feedback,'confirmed':suggestion.confirmed, 'run_id':suggestion.run_id,
-            'sources':db.get(m.AgentRun,suggestion.run_id).output.get('sources',[])}
+            'sources':suggestion_run.output.get('sources',[])}
     elif run:
         result['ai_suggestion'] = {'run_id':run.id,'state':run.state,'error_code':run.error_code}
     return result
@@ -145,19 +153,29 @@ def evidence_view(db, ctx, records):
     for record in records:
         chunk = require(db.get(m.SourceChunk, record['chunk_id']))
         version, source = version_access(db, ctx, chunk.version_id)
-        if chunk.id in seen:
+        quote = record.get('quote', chunk.text)
+        key = (chunk.id, quote)
+        if key in seen:
             continue
-        seen.add(chunk.id)
+        seen.add(key)
         doc = db.scalar(select(m.SourceDocument.id).where(m.SourceDocument.version_id == version.id))
         result.append({'chunk_id':chunk.id,'version_id':version.id,'source_title':source.title,
-            'version':version.number,'position':chunk.position,'heading':chunk.heading,'text':record.get('quote',chunk.text),
+            'version':version.number,'position':chunk.position,'heading':chunk.heading,'text':quote,
             'page':chunk.position if doc else None,'url':f'/sources/{version.id}?page={chunk.position}&chunk={chunk.id}'})
     return result
 
 
 def question_evidence(db, ctx, question_id):
     records = db.scalars(select(m.ArtifactEvidence).where(m.ArtifactEvidence.artifact_kind == 'question', m.ArtifactEvidence.artifact_id == question_id))
-    return evidence_view(db,ctx,[{'chunk_id':r.chunk_id,'quote':r.quote} for r in records])
+    visible = []
+    for record in records:
+        chunk = db.get(m.SourceChunk, record.chunk_id)
+        try:
+            version_access(db, ctx, chunk.version_id, published=True)
+        except HTTPException:
+            continue
+        visible.append({'chunk_id':record.chunk_id,'quote':record.quote})
+    return evidence_view(db,ctx,visible)
 
 
 def assignment_access(db, ctx, assignment_id):
@@ -177,6 +195,8 @@ def assignment_access(db, ctx, assignment_id):
 def start_assignment(db, ctx, assignment_id):
     from .learning import create_attempt
     need(ctx,'student')
+    # Serialize the first open for this student, even before a submission exists.
+    db.get(m.Membership, ctx.membership.id, with_for_update=True)
     assignment = assignment_access(db,ctx,assignment_id)
     sub = db.scalar(select(m.AssignmentSubmission).where(m.AssignmentSubmission.assignment_id == assignment.id, m.AssignmentSubmission.membership_id == ctx.membership.id))
     if sub:
@@ -273,7 +293,7 @@ def remediation_view(db, ctx, remediation):
         for link in group_tasks(db,practice,True):
             a=db.scalar(select(m.Attempt).where(m.Attempt.task_id==link.task_id))
             e=current_evaluation(db,a.id)
-            attempts.append({'id':a.id,'grading_state':grading_view(db,a)['grading_state'],
+            attempts.append({'id':a.id,'grading_state':grading_view(db,ctx,a)['grading_state'],
                 'independent_correct':bool(e and e['score']==db.get(m.QuestionVersion,a.question_version_id).max_score and a.hint_level==0)})
         practice_results.append({'id':practice.id,'state':practice.state,'total':len(attempts),
             'independent_correct':sum(a['independent_correct'] for a in attempts),'attempts':attempts})
@@ -284,4 +304,5 @@ def remediation_view(db, ctx, remediation):
         'sources':question_evidence(db,ctx,q.id),'cards':public_cards,'group_url':task_group_url(db,attempt.task_id),
         'resolved':bool(eval_ and eval_['score']==q.max_score and attempt.hint_level==0) or any(p['state']=='submitted' and p['total']>0 and p['independent_correct']==p['total'] for p in practice_results),
         'practice_results':practice_results,
-        'diagnosis':agent_view(diagnosis) if diagnosis else None,'practices':[agent_view(r) for r in practices]}
+        'diagnosis':next(iter(visible_agents(db,ctx,[diagnosis])),None) if diagnosis else None,
+        'practices':visible_agents(db,ctx,practices)}

@@ -8,7 +8,7 @@ import { AgentResult, type AgentRun } from './agents';
 
 type AIRun={id:string;purpose:string;state:string;model:string;attempt_id:string|null;error_code:string;result:{explanation?:string;candidate_cause?:string;reliable?:boolean;dimensions?:Record<string,unknown>[];sources?:Evidence[];notice?:string};metrics:Record<string,unknown>};
 const purposes:Record<string,string>={question:'当前题目答疑',hint:'递进提示',cause:'候选错因',evaluation:'分析题辅助评价',lesson:'教案草稿'};
-const errors:Record<string,string>={MODEL_NOT_CONFIGURED:'尚未配置 DeepSeek Key',MODEL_AUTH_FAILED:'密钥鉴权失败',MODEL_INSUFFICIENT_BALANCE:'模型账户余额不足',MODEL_TIMEOUT:'模型调用超时',MODEL_RATE_LIMIT:'模型请求限流',SOURCE_NOT_ENABLED:'请教师先启用原文并生成内容',NO_EVIDENCE:'没有可用的已启用教师原文',INDEX_NOT_READY:'资料索引尚未完成',EMBEDDING_MODEL_UNAVAILABLE:'本地向量模型未就绪',MODEL_OUTPUT_INVALID:'模型返回格式不符合要求'};
+const errors:Record<string,string>={MODEL_NOT_CONFIGURED:'学习助手尚未配置',MODEL_AUTH_FAILED:'密钥鉴权失败',MODEL_INSUFFICIENT_BALANCE:'模型账户余额不足',MODEL_TIMEOUT:'模型调用超时',MODEL_RATE_LIMIT:'模型请求限流',SOURCE_NOT_ENABLED:'请教师先启用原文并生成内容',NO_EVIDENCE:'没有可用的已启用教师原文',INDEX_NOT_READY:'资料索引尚未完成',EMBEDDING_MODEL_UNAVAILABLE:'本地向量模型未就绪',MODEL_OUTPUT_INVALID:'模型返回格式不符合要求'};
 
 Object.assign(errors,{CONTENT_UNAVAILABLE:'依据资料已撤回或访问权限变化，请联系教师',MODEL_CONFIGURATION_CHANGED:'模型配置已变化，请发起新任务',MODEL_CONNECTION_ERROR:'无法连接模型服务，请检查网络后重试',MODEL_REQUEST_REJECTED:'模型服务拒绝请求，请检查服务端配置',INVALID_CITATION:'引用未通过真实性检查，请转教师核对',WORKER_INTERRUPTED:'任务执行被中断，可以重试',ACCESS_REVOKED:'当前访问权限已变化，请重新登录'});
 const documentErrors:Record<string,string>={DOCX_CONVERTER_REQUIRED:'未找到文档转换工具，请先准备 LibreOffice',DOCX_CONVERSION_FAILED:'DOCX 转换失败，请检查文件后重试',DOCX_CONVERSION_TIMEOUT:'文档转换超时，可以重试或改用文本 PDF',PDF_ENCRYPTED:'PDF 已加密，请使用可读取的文件',SCANNED_PAGE_OCR_UNSUPPORTED:'发现扫描页，当前版本不支持 OCR',DOCUMENT_EMPTY:'文件没有可提取的正文',DOCUMENT_PAGE_LIMIT:'文件超过 1000 页限制',DOCUMENT_INVALID:'文件损坏或无法解析',DOCUMENT_CHANGED:'转换期间文件版本发生变化，请重新提交'};
@@ -36,7 +36,7 @@ export function AILearning({attemptId,draft,essay,hintLevel,beforeRun,afterRun}:
   useEffect(()=>{const completed=(query.data??[]).filter(r=>['succeeded','failed'].includes(r.state)&&!refreshed.current.has(r.id));if(completed.length){completed.forEach(r=>refreshed.current.add(r.id));afterRun()}},[query.data,afterRun]);
   useEffect(()=>{setLevel(Math.min(4,hintLevel+1))},[hintLevel]);
   async function start(purpose:string){await run(async()=>{await beforeRun();const result=await api('/ai/requests','POST',{purpose,attempt_id:attemptId,question,level},key());await afterRun();return result},'AI 任务已提交');}
-  return <Card title="DeepSeek 学习助手"><p>围绕当前题目提问，引用可打开原页。AI 帮助会记录为辅助作答。</p>
+  return <Card title="学习助手"><p>围绕当前题目提问，引用可打开原页。AI 帮助会记录为辅助作答。</p>
     <Input.TextArea aria-label="当前题目疑问" rows={3} value={question} onChange={e=>setQuestion(e.target.value)} maxLength={2000} placeholder="描述卡住的地方，或直接选择分析功能"/>
     <Space wrap className="section-space"><Button loading={busy} onClick={()=>start('question')}>带依据答疑</Button>{draft?<><Select aria-label="AI提示级别" value={level} onChange={setLevel} options={[1,2,3,4].map(n=>({value:n,label:`第 ${n} 级`,disabled:n>hintLevel+1}))}/><Button loading={busy} onClick={()=>start('hint')}>获取 AI 提示</Button></>:<Link to={'/mistakes?attempt='+attemptId}><Button>进入错题诊断</Button></Link>}</Space>
     <Button block loading={busy} onClick={()=>run(()=>api('/attempts/'+attemptId+'/referrals','POST',{text:question.trim()||'希望教师帮助核对当前题目、依据及学习困难'}),'已提交教师处理')}>转教师帮助</Button>
@@ -70,10 +70,10 @@ export function Lessons(){
 }
 
 export function AISettings(){
-  const status=useQuery({queryKey:['ai-status'],queryFn:()=>api<{configured:boolean;model:string;price_version:string}>('/ai/status')});
+  const status=useQuery({queryKey:['ai-status'],queryFn:()=>api<{configured:boolean;model:string;provider:string;price_version:string|null}>('/ai/status')});
   const [result,setResult]=useState('');
   const {run,busy}=useRun();
-  return <><PageTitle title="AI 服务状态" description="密钥仅在本机服务端 .env 配置，本页面不接收或显示密钥。"/><State query={status}><Card><Tag color={status.data?.configured?'green':'orange'}>{status.data?.configured?'已配置，待测试连接':'未配置'}</Tag><p>DeepSeek · {status.data?.model}</p><p>填写 MODEL_API_KEY 后重启 API 和 worker，再测试真实连接。</p><p>费用估算版本：{status.data?.price_version}</p><Button loading={busy} onClick={()=>run(async()=>{const r=await api<{connected:boolean}>('/ai/connection-test','POST');setResult(r.connected?'真实连接成功':'连接返回未通过');return r})}>测试真实连接</Button>{result&&<Alert type="info" message={result}/>}</Card></State></>;
+  return <><PageTitle title="AI 服务状态" description="模型凭据由服务端管理。"/><State query={status}><Card><Tag color={status.data?.configured?'green':'orange'}>{status.data?.configured?'已配置，待测试连接':'未配置'}</Tag><p>{status.data?.provider} · {status.data?.model}</p><p>{status.data?.provider==='DeepTutor'?'通过当前教学服务测试连接。':'填写 MODEL_API_KEY 后重启服务，再测试真实连接。'}</p>{status.data?.price_version&&<p>费用估算版本：{status.data.price_version}</p>}<Button loading={busy} onClick={()=>run(async()=>{const r=await api<{connected:boolean}>('/ai/connection-test','POST');setResult(r.connected?'真实连接成功':'连接返回未通过');return r})}>测试真实连接</Button>{result&&<Alert type="info" message={result}/>}</Card></State></>;
 }
 
 type Doc={filename:string;state:string;error_code:string;confirmed:boolean;pages:{number:number;width:number;height:number;blocks:{text:string;bbox:number[]}[]}[];preview_url:string|null;original_url:string};

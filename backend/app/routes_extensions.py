@@ -8,9 +8,9 @@ from .auth import context, need, teacher_can_view
 from .db import get_db, SessionLocal
 from .errors import fail, require
 from .api_common import EnvelopeRoute, idempotent, no_active_diagnostic, entity
-from .content import version_access, audit
+from .content import version_access, source_preview_access, audit
 from .learning import owned_attempt
-from .ai_services import AIInput, TUTOR_CHAT, advisory_model, configured, completion, evidence_access, CAUSES
+from .ai_services import AIInput, TUTOR_CHAT, advisory_completion, advisory_model, configured, completion, evidence_access, CAUSES
 from .ai import WorkflowError
 from .config import settings
 from .documents import document_view
@@ -74,7 +74,7 @@ async def replace_original(version_id: str, file: UploadFile = File(...), ctx=De
 @router.get('/sources/versions/{version_id}/document')
 def document(version_id: str, ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
-    version_access(db, ctx, version_id)
+    source_preview_access(db, ctx, version_id)
     row = db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == version_id))
     return document_view(row) if row else None
 
@@ -82,7 +82,7 @@ def document(version_id: str, ctx=Depends(context), db=Depends(get_db)):
 @router.get('/sources/versions/{version_id}/{file_kind}')
 def original(version_id: str, file_kind: str, ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
-    version, source = version_access(db, ctx, version_id)
+    version, source = source_preview_access(db, ctx, version_id)
     if file_kind not in ('original', 'preview'):
         fail(404, 'NOT_FOUND', '文件不存在')
     row = db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == version_id))
@@ -102,7 +102,7 @@ def original(version_id: str, file_kind: str, ctx=Depends(context), db=Depends(g
 @router.get('/sources/versions/{version_id}/pages/{page}')
 def page_image(version_id: str, page: int, chunk: str = '', ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
-    version_access(db, ctx, version_id)
+    source_preview_access(db, ctx, version_id)
     row = require(db.scalar(select(m.SourceDocument).where(m.SourceDocument.version_id == version_id)))
     if not row.preview_key or not 1 <= page <= len(row.pages):
         fail(404, 'NOT_FOUND', '原页尚未生成')
@@ -149,6 +149,8 @@ def rebuild(version_id: str, ctx=Depends(context), db=Depends(get_db)):
     if not (ctx.has('teacher') or ctx.has('admin')):
         fail(403, 'ROLE_REQUIRED', '需要内容管理角色')
     version_access(db, ctx, version_id)
+    if settings.native_teaching_pipeline:
+        fail(409, 'NATIVE_INDEX_MANAGED', 'DeepTutor 在出题时为选定资料建立索引，可重试失败的生成任务')
     job = m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='index', resource_id=version_id)
     db.add(job)
     db.flush()
@@ -162,6 +164,8 @@ def index_status(version_id: str, ctx=Depends(context), db=Depends(get_db)):
     version_access(db, ctx, version_id)
     from .search import fingerprint
     ids = list(db.scalars(select(m.SourceChunk.id).where(m.SourceChunk.version_id == version_id)))
+    if settings.native_teaching_pipeline:
+        return {'backend': 'deeptutor', 'chunks': len(ids), 'indexed': 0, 'state': 'ready' if ids else 'not_ready'}
     indexed = len(list(db.scalars(select(m.ChunkEmbedding.id).where(m.ChunkEmbedding.chunk_id.in_(ids), m.ChunkEmbedding.model_revision == fingerprint()))))
     return {'model_revision': fingerprint(), 'chunks': len(ids), 'indexed': indexed,
             'state': 'ready' if ids and len(ids) == indexed else 'not_ready'}
@@ -170,28 +174,36 @@ def index_status(version_id: str, ctx=Depends(context), db=Depends(get_db)):
 @router.get('/ai/status')
 def ai_status(ctx=Depends(context)):
     need(ctx, 'admin')
-    return {'configured': configured(), 'model': settings.model_name, 'provider': 'DeepSeek',
-            'key_present': bool(settings.model_api_key), 'price_version': settings.model_price_version}
+    model = advisory_model('lesson')
+    native = model == TUTOR_CHAT
+    return {'configured': configured(model), 'model': model, 'provider': 'DeepTutor' if native else 'DeepSeek',
+            'key_present': False if native else bool(settings.model_api_key),
+            'price_version': None if native else settings.model_price_version}
 
 
 @router.post('/ai/connection-test')
 def connection_test(ctx=Depends(context), db=Depends(get_db)):
     need(ctx, 'admin')
-    if not configured():
-        fail(503, 'MODEL_NOT_CONFIGURED', '请在服务端 .env 填写 MODEL_API_KEY 后重启服务')
+    model = advisory_model('lesson')
+    native = model == TUTOR_CHAT
+    if not configured(model):
+        fail(503, 'MODEL_NOT_CONFIGURED', '请配置 DeepTutor 服务和内部连接' if native else
+             '请在服务端 .env 填写 MODEL_API_KEY 后重启服务')
     # Authentication read the session using this request's DB transaction.
     # Release it before the external provider call as well.
     db.commit()
     metrics = {}
     try:
-        result = completion([{'role': 'system', 'content': '只返回JSON {"ok":true}'}, {'role': 'user', 'content': '测试连接'}], metrics)
+        prompt = [{'role': 'system', 'content': '只返回JSON {"ok":true}'}, {'role': 'user', 'content': '测试连接'}]
+        result = (advisory_completion(model, f'v1:health:{ctx.user.id}', m.uid(), prompt, metrics)
+                  if native else completion(prompt, metrics))
     except WorkflowError as exc:
         with SessionLocal.begin() as log_db:
             audit(log_db, ctx, 'ai.connection_test', ctx.user.id, {'error_code': exc.code, 'metrics': metrics})
-        fail(503, exc.code, 'DeepSeek 连接测试失败，请核对密钥、余额或网络')
+        fail(503, exc.code, ('DeepTutor' if native else 'DeepSeek') + ' 连接测试失败，请核对服务配置或网络')
     with SessionLocal.begin() as log_db:
         audit(log_db, ctx, 'ai.connection_test', ctx.user.id, {'connected': result.get('ok') is True, 'metrics': metrics})
-    return {'connected': result.get('ok') is True, 'metrics': metrics, 'model': settings.model_name}
+    return {'connected': result.get('ok') is True, 'metrics': metrics, 'model': model}
 
 
 @router.post('/ai/requests', status_code=202)
@@ -221,6 +233,7 @@ def create_ai(data: AIInput, request: Request, ctx=Depends(context), db=Depends(
                 db.add(m.LearningEvent(attempt_id=a.id, kind='ai_requested', event_key=m.uid(), payload={'purpose': data.purpose, 'level': data.level}))
         payload = data.model_dump()
         payload['draft'] = data.purpose != 'lesson' and a.status == 'draft'
+        payload['_native_retrieval'] = model == TUTOR_CHAT and settings.deeptutor_native_knowledge
         row = m.AIRequest(org_id=ctx.org_id, owner_id=ctx.user.id, membership_id=ctx.membership.id,
             attempt_id=data.attempt_id if data.purpose != 'lesson' else None, knowledge_id=data.knowledge_id,
             purpose=data.purpose, input=payload, model=model)
@@ -408,7 +421,7 @@ def learning_chain(attempt_id: str, ctx=Depends(context), db=Depends(get_db)):
             attempt = db.scalar(select(m.Attempt).where(m.Attempt.task_id==link.task_id))
             related.append(attempt.id)
             entries.append({**entity(attempt,'id','status','answer','response_text','hint_level'),
-                            **grading_view(db,attempt),'evaluation':current_evaluation(db,attempt.id)})
+                            **grading_view(db,ctx,attempt),'evaluation':current_evaluation(db,attempt.id)})
         practices.append({'id':practice.id,'state':practice.state,'attempts':entries})
     reviews = list(db.scalars(select(m.ReviewSchedule).where(m.ReviewSchedule.attempt_id.in_(related))))
     return {'remediation': entity(remediation, 'id', 'cause', 'cause_status') if remediation else None,

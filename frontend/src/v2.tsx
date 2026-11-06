@@ -12,12 +12,18 @@ type Task = {id:string;project_id:string;project_title?:string;title:string;kind
 type Project = {id:string;title:string;scenario:string;subject_id:string;exam_year:number;daily_minutes:number;target_score?:number;deadline?:string;state:string;revision:number};
 type Material = {id:string;title:string;state:string;source_version_id?:string;text?:string};
 type Report = {knowledge:{knowledge:string;state:string;kind:string;created_at:string}[];evidence_count:number;completed_tasks:number;task_count:number;correct:number;answered:number;due_reviews:number;coverage_note:string;syllabi:{year:number;edition:string;total:number;studied:number;verified:number}[]};
-type Detail = Project & {materials:Material[];tasks:Task[];report:Report};
+type Outline = {name:string;points:string[]}[];
+type Detail = Project & {materials:Material[];tasks:Task[];report:Report;mastery_outline?:Outline};
 type Question = {id:string;kind:string;prompt:string;options:Record<string,string>;origin:string;answer?:string[];quote?:string;explanation?:string;rubric?:string[]};
 type Result = {correct?:boolean;feedback?:string;evaluator?:string;state?:string;question?:Question;run_id?:string};
-type Run = {id:string;state:string;kind:string;result:{text?:string;coverage_note?:string;citations?:Citation[]};error:string};
+type Run = {id:string;state:string;kind:string;result:{text?:string;coverage_note?:string;citations?:Citation[];outline?:Outline};error:string};
 const names:Record<string,string> = {reading:'资料学习',practice:'理解检查',verification:'独立验证',review:'间隔复习',remediation:'针对性补学',todo:'待开始',in_progress:'进行中',completed:'已完成',deferred:'已暂缓',cancelled:'已取消'};
 const evidenceNames:Record<string,string> = {reading:'阅读记录',needs_remediation:'需补学的作答',independent_pass:'新题独立通过',delayed_pass:'延迟复习通过'};
+
+function MasteryOutline({outline}:{outline?:Outline}) {
+  if (!outline?.length) return null;
+  return <section aria-label="知识点地图"><h3>知识点地图</h3><ol>{outline.map((module,i)=><li key={i}><strong>{module.name}</strong><ul>{module.points.map((point,j)=><li key={j}>{point}</li>)}</ul></li>)}</ol></section>;
+}
 
 function TaskList({tasks}:{tasks:Task[]}) {
   return <div className="v2-task-list">{tasks.map(t=><div className="v2-task" key={t.id}><div><Space><Tag>{names[t.kind]||t.kind}</Tag><span className="muted">{t.project_title}</span></Space><h3>{t.title}</h3><p>{t.reason}</p>{t.due_at&&<small>安排时间：{new Date(t.due_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}</small>}</div><div className="v2-task-action"><span>{t.estimated_minutes} 分钟 · {names[t.state]}</span><Link to={'/learning/session/'+t.id}><Button icon={<ArrowRightOutlined aria-hidden/>}>{t.state==='completed'?'查看记录':'进入学习'}</Button></Link></div></div>)}</div>;
@@ -83,11 +89,13 @@ function ProjectContent({p}:{p:Detail}) {
     {p.materials.some(m=>m.state==='ready')?<MaterialSearch projectId={p.id}/>:<Blank description="添加资料后，系统会安排第一项学习任务。"/>}</>;
   return <><PageTitle title={p.title} description={`${p.exam_year} 考研政治 · 每日 ${p.daily_minutes} 分钟 · 计划版本 ${p.revision}`} action={<Link to="/learning/projects">返回项目列表</Link>}/>
     {!active&&<Alert type="info" message="项目已归档，保留历史记录"/>}
+    <MasteryOutline outline={p.mastery_outline}/>
     <Tabs items={[
       {key:'study',label:'学习与任务',children:<>{p.tasks.length?<TaskList tasks={p.tasks}/>:<Blank description="先在“课程与资料”中选择材料。"/>}{active&&!!p.tasks.filter(t=>t.state==='deferred').length&&<Button onClick={()=>run(()=>Promise.all(p.tasks.filter(t=>t.state==='deferred').map(t=>apiV2('/tasks/'+t.id,'PATCH',{state:'todo'}))),'已恢复暂缓任务')}>恢复暂缓任务</Button>}</>},
       {key:'materials',label:'课程与资料',children:materialPanel},
       {key:'annual',label:'年度考纲与试卷',children:<ExamResources projectId={p.id} examYear={p.exam_year} active={active}/>},
       {key:'notes',label:'笔记与闪卡',children:<NotesPanel projectId={p.id} disabled={!active}/>},
+      {key:'chat-history',label:'答疑记录',children:<ChatHistory key={p.id} projectId={p.id}/>},
       {key:'report',label:'证据与报告',children:<ReportPanel report={p.report}/>},
       {key:'plan',label:'计划设置',children:<><Form layout="vertical" key={p.revision} initialValues={{daily_minutes:p.daily_minutes,target_score:p.target_score,deadline:p.deadline}} onFinish={values=>run(()=>apiV2('/learning-projects/'+p.id+'/plans','POST',{...values,deadline:values.deadline||null,revision:p.revision},key()),'计划已更新，历史版本已保留')}><Form.Item name="daily_minutes" label="每日时间预算（分钟）"><InputNumber min={10} max={480} disabled={!active}/></Form.Item><Form.Item name="target_score" label="目标分数"><InputNumber min={0} max={100} disabled={!active}/></Form.Item><Form.Item name="deadline" label="目标日期（可选）"><Input type="date" disabled={!active}/></Form.Item><Button htmlType="submit" type="primary" loading={busy} disabled={!active}>确认调整计划</Button></Form><Button danger style={{marginTop:32}} disabled={!active} onClick={()=>modal.confirm({title:'归档学习项目？',content:'项目将退出今日计划，历史记录仍保留。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/archive','POST'),'已归档')})}>归档项目</Button></>},
     ]}/>
@@ -120,10 +128,65 @@ function EvidencePanel({report}:{report:Report}) {
   return <><Alert type="info" message={report.coverage_note} style={{background:'#edf4ee',borderColor:'#d3e1d6'}}/><div className="v2-overview"><div><span>已完成任务</span><strong>{report.completed_tasks}<small> / {report.task_count}</small></strong></div><div><span>已答题目</span><strong>{report.answered}</strong></div><div><span>到期复习</span><strong>{report.due_reviews}</strong></div></div><h2>知识点与最新证据</h2>{report.knowledge.length?report.knowledge.map(k=><div className="v2-material" key={k.knowledge}><div><strong>{k.knowledge}</strong><p>{evidenceNames[k.kind]||'学习记录'} · {new Date(k.created_at).toLocaleDateString('zh-CN')}</p></div><Tag color={k.state==='待验证'?'gold':'green'}>{k.state}</Tag></div>):<Blank description="完成独立作答后，这里将显示知识点证据。"/>}</>;
 }
 
+type ChatHistoryPage = {items:{id:string;title:string;created_at:string}[];next_offset:number|null};
+type ChatHistoryItem = {prompt:string;text?:string;citations?:Citation[];coverage_note?:string};
+
+function ChatHistory({projectId}:{projectId:string}) {
+  const [offset,setOffset]=useState(0);
+  const [selected,setSelected]=useState<string>();
+  const path='/learning-projects/'+projectId+'/chat-history';
+  const history=useQuery({queryKey:[path,offset],queryFn:()=>apiV2<ChatHistoryPage>(path+'?offset='+offset)});
+  const answer=useQuery({queryKey:[path,selected],queryFn:()=>apiV2<ChatHistoryItem>(path+'/'+selected),enabled:!!selected});
+  return <State query={history}>{history.data&&<>
+    {history.data.items.length===0&&<Blank description="本项目暂无可查看的答疑记录。"/>}
+    {history.data.items.map(item=><div className="v2-note" key={item.id}>
+      <Button type="link" onClick={()=>setSelected(item.id)}>{item.title}</Button>
+      <span className="muted">{new Date(item.created_at).toLocaleString()}</span>
+    </div>)}
+    <Space>
+      {offset>0&&<Button onClick={()=>setOffset(offset-20)}>上一页</Button>}
+      {history.data.next_offset!==null&&<Button onClick={()=>setOffset(history.data?.next_offset??offset)}>下一页</Button>}
+    </Space>
+    <Modal title="答疑记录" open={!!selected} footer={null} onCancel={()=>setSelected(undefined)}>
+      {selected&&<State query={answer}>{answer.data&&<>
+        <h3>{answer.data.prompt}</h3>
+        <p style={{whiteSpace:'pre-wrap'}}>{answer.data.text}</p>
+        <p className="muted">{answer.data.coverage_note}</p>
+        <CitationList projectId={projectId} citations={answer.data.citations??[]}/>
+      </>}</State>}
+    </Modal>
+  </>}</State>;
+}
+
 function NotesPanel({projectId,disabled=false}:{projectId:string;disabled?:boolean}) {
-  const query=useQuery({queryKey:['v2-notes',projectId],queryFn:()=>apiV2<{id:string;title:string;body:string;kind:string}[]>('/learning-projects/'+projectId+'/notes')});
-  const {run,busy}=useRun();const [form]=Form.useForm();
-  return <><Form form={form} layout="vertical" initialValues={{kind:'note'}} onFinish={async values=>{const result=await run(()=>apiV2('/learning-projects/'+projectId+'/notes','POST',values,key()),'已保存');if(result)form.resetFields()}}><Space><Form.Item name="kind"><Select options={[{value:'note',label:'学习笔记'},{value:'flashcard',label:'记忆闪卡'}]} style={{width:130}}/></Form.Item><Form.Item name="title" rules={[{required:true,whitespace:true}]}><Input placeholder="标题／卡片正面" maxLength={200}/></Form.Item></Space><Form.Item name="text" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={4} placeholder="我的理解／卡片背面"/></Form.Item><Button disabled={disabled} loading={busy} htmlType="submit">保存</Button></Form><State query={query}>{query.data?.map(n=><article className="v2-note" key={n.id}><Tag>{n.kind==='flashcard'?'闪卡':'笔记'}</Tag><h3>{n.title}</h3>{n.kind==='flashcard'?<details><summary>尝试回忆后查看</summary><p>{n.body}</p></details>:<p>{n.body}</p>}</article>)}</State></>;
+  const path='/learning-projects/'+projectId+'/notes';
+  const query=useQuery({queryKey:['v2-notes',projectId],queryFn:()=>apiV2<{id:string;title:string;body:string;kind:string}[]>(path)});
+  const {run,busy}=useRun();
+  const [form]=Form.useForm();
+  const pending=useRef<{content:string;key:string}|undefined>(undefined);
+
+  async function save(values:{kind:string;title:string;text:string}) {
+    const content=JSON.stringify([path,values.kind,values.title,values.text]);
+    const idempotencyKey=pending.current?.content===content?pending.current.key:key();
+    pending.current={content,key:idempotencyKey};
+    const result=await run(()=>apiV2(path,'POST',values,idempotencyKey),'已保存');
+    if(result) {
+      pending.current=undefined;
+      form.resetFields();
+    }
+  }
+
+  return <><Form form={form} layout="vertical" initialValues={{kind:'note'}} onFinish={save}>
+    <Space>
+      <Form.Item name="kind"><Select options={[{value:'note',label:'学习笔记'},{value:'flashcard',label:'记忆闪卡'}]} style={{width:130}}/></Form.Item>
+      <Form.Item name="title" rules={[{required:true,whitespace:true}]}><Input placeholder="标题／卡片正面" maxLength={200}/></Form.Item>
+    </Space>
+    <Form.Item name="text" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={4} placeholder="我的理解／卡片背面"/></Form.Item>
+    <Button disabled={disabled} loading={busy} htmlType="submit">保存</Button>
+  </Form><State query={query}>{query.data?.map(n=><article className="v2-note" key={n.id}>
+    <Tag>{n.kind==='flashcard'?'闪卡':'笔记'}</Tag><h3>{n.title}</h3>
+    {n.kind==='flashcard'?<details><summary>尝试回忆后查看</summary><p>{n.body}</p></details>:<p>{n.body}</p>}
+  </article>)}</State></>;
 }
 
 type StudyData = {task:Task;project:Project;material?:Material;checkpoint:{text?:string;answer?:string[]};revision:number;question?:Question;result?:Result;ai_run_id?:string;native_solve?:boolean;native_lessons?:boolean};
@@ -139,6 +202,7 @@ function StudyContent({data}:{data:StudyData}) {
   const [text,setText]=useState(data.checkpoint.text||'');const [answer,setAnswer]=useState<string[]>(data.checkpoint.answer||[]);
   const [revision,setRevision]=useState(data.revision);const [confidence,setConfidence]=useState('normal');
   const [prompt,setPrompt]=useState('');const [runId,setRunId]=useState<string|undefined>(data.ai_run_id||data.result?.run_id);const [hint,setHint]=useState('');
+  const [readingQuestion,setReadingQuestion]=useState('');
   const t=data.task;const closed=['completed','cancelled'].includes(t.state)||!!data.result;
   const [questionKind,setQuestionKind]=useState('single');
   const ai=useQuery({queryKey:['v2-run',runId],queryFn:()=>apiV2<Run>('/ai-runs/'+runId),enabled:!!runId,refetchInterval:q=>q.state.data&&['succeeded','failed','cancelled'].includes(q.state.data.state)?false:1500});
@@ -160,11 +224,13 @@ function StudyContent({data}:{data:StudyData}) {
     <Space wrap style={{marginTop:12}}>
       {data.native_solve&&t.state==='completed'&&data.result?.question&&<Button loading={busy} onClick={()=>lesson('solve','请讲解这道题')}>讲这道题</Button>}
       {data.native_lessons&&data.material&&['reading','remediation'].includes(t.kind)&&<Button loading={busy} onClick={()=>lesson('read','帮我精读这份讲义，找出关键概念和容易混淆的考点')}>读讲义</Button>}
-      {data.native_lessons&&<Button loading={busy} onClick={()=>lesson('guide','围绕当前任务建议下一步复习：'+t.title)}>继续学</Button>}
+      {data.native_lessons&&<Button loading={busy} onClick={()=>lesson('guide','围绕当前任务建议下一步复习：'+t.title)}>学习路径</Button>}
     </Space>
+    {data.native_lessons&&ai.data?.kind==='read'&&ai.data.state==='succeeded'&&<Space.Compact style={{marginTop:12,width:'100%'}}><Input aria-label="精读追问" value={readingQuestion} onChange={e=>setReadingQuestion(e.target.value)} placeholder="就同一份讲义继续提问"/><Button loading={busy} disabled={!readingQuestion.trim()} onClick={()=>lesson('read',readingQuestion.trim())}>继续精读</Button></Space.Compact>}
     <hr/><h2>随学助教</h2><p className="muted">基于当前项目资料解释，保留问题与执行记录。</p><Input.TextArea aria-label="向助教提问" rows={3} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="例如：这里的两个概念有什么区别？"/><Button style={{marginTop:12}} loading={busy} disabled={!prompt.trim()} onClick={ask}>解释我的问题</Button>
     {ai.data&&<div className="v2-ai-result"><Tag>{({queued:'排队中',running:'正在思考',cancel_requested:'正在停止',cancelled:'已停止',succeeded:'已完成',failed:'未完成'} as Record<string,string>)[ai.data.state]||ai.data.state}</Tag>{['queued','running'].includes(ai.data.state)&&<Button size="small" loading={busy} onClick={async()=>{await run(()=>apiV2('/ai-runs/'+runId+'/cancel','POST'));void ai.refetch()}}>停止生成</Button>}{ai.data.error&&<Alert type="error" message={ai.data.error}/>}<p>{ai.data.result.text}</p>{ai.data.result.coverage_note&&<small>{ai.data.result.coverage_note}</small>}{!!ai.data.result.citations?.length&&<CitationList projectId={data.project.id} citations={ai.data.result.citations}/>}</div>}
-    {ai.data?.kind==='guide'&&ai.data.state==='succeeded'&&!!ai.data.result.citations?.length&&<Button loading={busy} onClick={async()=>{const result=await run(()=>apiV2<{task_id:string}>('/ai-runs/'+runId+'/accept-guide','POST'),'已加入学习计划');if(result)navigate('/learning/session/'+result.task_id)}}>加入学习计划</Button>}
+    {ai.data?.state==='failed'&&<Button loading={busy} onClick={async()=>{const result=await run(()=>apiV2<{run_id:string}>('/ai-runs/'+runId+'/retry','POST',{},key()));if(result)setRunId(result.run_id)}}>重试</Button>}
+    {ai.data?.kind==='guide'&&ai.data.state==='succeeded'&&<><MasteryOutline outline={ai.data.result.outline}/>{!!ai.data.result.citations?.length&&<Button loading={busy} onClick={async()=>{const result=await run(()=>apiV2<{task_id:string}>('/ai-runs/'+runId+'/accept-guide','POST'),'已加入学习计划');if(result)navigate('/learning/session/'+result.task_id)}}>加入学习计划</Button>}</>}
     <Button type="text" disabled={closed} onClick={()=>run(()=>apiV2('/tasks/'+t.id,'PATCH',{state:'deferred'}),'已暂缓，任务仍保留在项目中')}>暂缓这项任务</Button>
   </section></div></>;
 }

@@ -5,10 +5,11 @@ from pydantic import Field, HttpUrl, model_validator
 from sqlalchemy import select
 from ..api_common import EnvelopeRoute, entity, idempotent
 from ..auth import context
+from ..config import settings
 from ..models import AuditEvent
 from ..db import get_db
 from ..errors import fail
-from . import models as m, service as s
+from . import models as m, service as s, tutor_index
 from .routes import Input
 
 router = APIRouter(route_class=EnvelopeRoute)
@@ -117,6 +118,8 @@ def import_resource(project_id: str, data: ResourceInput, request: Request, ctx=
             fail(409, 'EDITION_EXISTS', '该年度版本已存在，请使用新的版本号')
         material = s.add_material(db, p, f'{data.year} · {data.title} · {data.edition}'[:200], text,
                                   reading=data.kind == 'syllabus')
+        if settings.deeptutor_native_knowledge:
+            tutor_index.enqueue(db, ctx, p, [material])
         contents = {}
         if data.kind == 'syllabus':
             # Store the complete content once in the immutable source material.

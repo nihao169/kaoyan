@@ -1,5 +1,5 @@
 """V2 records. Evidence is immutable; projections and schedules are derived."""
-from sqlalchemy import String, Text, Integer, JSON, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Boolean, String, Text, Integer, JSON, ForeignKey, UniqueConstraint, Index, false
 from sqlalchemy.orm import Mapped, mapped_column
 from ..db import Base
 from ..models import Entity
@@ -24,6 +24,7 @@ class Project(Entity, Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     scope_revision: Mapped[int] = mapped_column(Integer, default=1)
     policy: Mapped[str] = mapped_column(String(60), default='kaoyan-politics-v1')
+    native_records: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Material(Entity, Base):

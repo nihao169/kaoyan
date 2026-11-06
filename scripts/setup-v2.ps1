@@ -50,6 +50,14 @@ if ($Release) {
     if ($LASTEXITCODE -ne 0) { throw 'Account initialization failed.' }
 }
 if (-not $SkipTutor) {
+    if ($Release -and !$env:ZX_DEEPTUTOR_IMAGE) {
+        $env:ZX_DEEPTUTOR_IMAGE = 'zhixing-deeptutor-native:1.7.1'
+        & docker image inspect $env:ZX_DEEPTUTOR_IMAGE 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            & docker build --pull=false -t $env:ZX_DEEPTUTOR_IMAGE integrations/deeptutor
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned DeepTutor release image build failed.' }
+        }
+    }
     New-Item -ItemType Directory -Force 'data\v2-deeptutor' | Out-Null
     & docker compose -f compose.v2.yaml run --rm --no-deps --entrypoint python deeptutor -m deeptutor_cli init --non-interactive
     if ($LASTEXITCODE -ne 0) { throw 'DeepTutor initialization failed.' }

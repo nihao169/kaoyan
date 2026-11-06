@@ -71,6 +71,85 @@ def exchange(data: Assertion, x_zhixing_signature: str = Header(default='')):
     return {'token': create_token(username, role='user', user_id=user_id)}
 
 
+class LearningRecord(BaseModel):
+    id: str = Field(pattern=r'^[a-f0-9-]{32,36}$')
+    kind: Literal['note', 'flashcard']
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=300000)
+    material_id: str | None
+    created_at: str
+
+
+class RecordsAssertion(Assertion):
+    records: list[LearningRecord] = Field(max_length=25)
+    listing: bool
+
+
+@app.post('/internal/learning-records')
+def learning_records(data: RecordsAssertion, x_zhixing_signature: str = Header(default='')):
+    from deeptutor.co_writer.storage import CoWriterDocument, get_co_writer_storage
+    from deeptutor.multi_user.models import CurrentUser
+    from deeptutor.multi_user.paths import scope_for_user, user_context
+    from deeptutor.notes.review import page_cards
+    from deeptutor.services.notebook import notebook_manager
+
+    check_assertion(data, x_zhixing_signature)
+    username, user_id = execution_user(data.principal)
+    user = CurrentUser(id=user_id, username=username, role='user', scope=scope_for_user(user_id, is_admin=False))
+    with user_context(user):
+        storage = get_co_writer_storage()
+        # The per-owner file lock also serializes retries across bridge processes.
+        with storage.locked():
+            notebook = notebook_manager.get_or_create_notebook('知行研学')
+            saved = {}
+            for record in notebook['records']:
+                meta = record.get('metadata', {}).get('zhixing')
+                if meta:
+                    saved[meta['id']] = {**meta, 'kind': 'note', 'title': record['title'], 'body': record['output']}
+            for doc_id in storage.list_doc_ids():
+                if not re.fullmatch(r'[a-f0-9]{32}', doc_id):
+                    continue
+                document = storage.load_document(doc_id)
+                if not document or not document.blocks:
+                    continue
+                props = document.blocks[0].get('props', {})
+                if props.get('kind') != 'flashcards':
+                    continue
+                meta = json.loads(props['data']).get('zhixing')
+                if meta:
+                    card, = page_cards(document)
+                    saved[meta['id']] = {**meta, 'kind': 'flashcard', 'title': card['front'], 'body': card['back']}
+            if data.listing:
+                return {'items': list(saved.values())}
+
+            items = []
+            for record in data.records:
+                item = record.model_dump()
+                previous = saved.get(record.id)
+                if previous:
+                    if any(previous[key] != item[key] for key in item if key != 'created_at'):
+                        raise HTTPException(409, 'Learning record id already has different content')
+                    items.append(previous)
+                    continue
+                meta = {key: item[key] for key in ('id', 'material_id', 'created_at')}
+                if record.kind == 'note':
+                    result = notebook_manager.add_record([notebook['id']], 'co_writer', record.title, '', record.body,
+                                                         metadata={'zhixing': meta})
+                    if notebook['id'] not in result['added_to_notebooks']:
+                        raise HTTPException(503, 'Notebook could not save this record')
+                else:
+                    doc_id = hashlib.sha256(record.id.encode()).hexdigest()[:32]
+                    if storage.doc_exists(doc_id):
+                        raise HTTPException(409, 'Flashcard document already exists')
+                    content = {'zhixing': meta, 'cards': [{'front': record.title, 'back': record.body}]}
+                    block = {'id': doc_id, 'type': 'learning', 'props': {'kind': 'flashcards',
+                             'data': json.dumps(content, ensure_ascii=False)}, 'children': []}
+                    storage._write(CoWriterDocument(id=doc_id, title=record.title, blocks=[block]))
+                saved[record.id] = item
+                items.append(item)
+            return {'items': items}
+
+
 class KnowledgeAssertion(Assertion):
     operation: Literal['create', 'status', 'search', 'delete', 'reader']
     name: str = Field(pattern=r'^zx_[0-9a-f]{48}$')

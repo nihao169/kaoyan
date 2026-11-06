@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Collapse, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
@@ -30,16 +30,20 @@ function GroupWork({groupId,practice}:{groupId:string;practice:boolean}){
   const query=useQuery({queryKey:['assignment-work',groupId,practice],queryFn:()=>api<Group>(path+(practice?'/open':'/start'),'POST'),refetchOnWindowFocus:false,refetchInterval:q=>q.state.data?.state==='submitted'&&q.state.data.entries.some(e=>e.attempt.grading_state==='AI初评中')?3000:false});
   const [current,setCurrent]=useState(0);
   const saveCurrent=useRef<(()=>Promise<unknown>)|null>(null);
+  const registerSave=useCallback((save:(()=>Promise<unknown>)|null)=>{saveCurrent.current=save;},[]);
   const {run,busy}=useRun();
   const group=query.data;
-  async function changeQuestion(index:number){await run(async()=>{if(group?.state==='draft')await saveCurrent.current?.();saveCurrent.current=null;setCurrent(index);});}
+  async function changeQuestion(index:number){
+    if(index===current||busy)return;
+    await run(async()=>{if(group?.state==='draft')await saveCurrent.current?.();saveCurrent.current=null;setCurrent(index);});
+  }
   async function submit(){await run(async()=>{await saveCurrent.current?.();const result=await api<Group>(path+'/submit','POST',{},key());await query.refetch();return result;},'整组答案已提交，客观题由系统判分，分析题进入AI初评');}
   return <><PageTitle title={group?.title??'读取题组'} description={practice?'针对原错题生成的个人练习，完成后统一提交。':'逐题填写与自动保存，整组提交后统一判分。'} action={<Link to={practice?'/mistakes':'/'}><Button>返回{practice?'错题诊断':'作业列表'}</Button></Link>}/><State query={query}>{group&&<>
     <section className="panel group-toolbar"><Space wrap><Tag color={group.state==='submitted'?'green':'default'}>{group.state==='submitted'?'整组已提交':'作答中'}</Tag><span>共 {group.entries.length} 题</span>{group.due_at&&<span>截止 {date(group.due_at)}</span>}</Space>
-      <div className="question-navigation">{group.entries.map((e,i)=><Button key={e.task.id} type={i===current?'primary':'default'} loading={busy&&i!==current} onClick={()=>changeQuestion(i)} aria-label={`切换第${i+1}题`}>{i+1}. {kindName(e.attempt.question.kind)}{e.attempt.status==='draft'?(e.attempt.answer.length||e.attempt.response_text?' · 已存草稿':''):' · '+e.attempt.grading_state}</Button>)}</div>
+      <div className="question-navigation">{group.entries.map((e,i)=><Button key={e.task.id} type={i===current?'primary':'default'} disabled={busy} onClick={()=>changeQuestion(i)} aria-current={i===current?'step':undefined} aria-label={`切换第${i+1}题`}>{i+1}. {kindName(e.attempt.question.kind)}{e.attempt.status==='draft'?(e.attempt.answer.length||e.attempt.response_text?' · 已存草稿':''):' · '+e.attempt.grading_state}</Button>)}</div>
       {group.state==='draft'?<Button type="primary" loading={busy} onClick={submit}>提交整组{practice?'练习':'作业'}</Button>:<Space wrap><Link to="/mistakes"><Button type="primary">查看错题并手动诊断</Button></Link><span className="muted">AI建议分不计入正式成绩，分析题等待教师确认。</span></Space>}
     </section>
-    {group.entries[current]&&<StudyTask key={group.entries[current].task.id} taskId={group.entries[current].task.id} registerSave={fn=>{saveCurrent.current=fn;}}/>}
+    {group.entries[current]&&<StudyTask key={group.entries[current].task.id} taskId={group.entries[current].task.id} registerSave={registerSave}/>}
   </>}</State></>;
 }
 

@@ -81,7 +81,7 @@ async def upload(file: UploadFile = File(...), knowledge_id: str | None = Form(N
 @router.get('/sources/versions/{version_id}', response_model=s.SourceOutput, response_model_exclude_unset=True)
 def source_detail(version_id: str, ctx=Depends(context), db=Depends(get_db)):
     no_active_diagnostic(db, ctx)
-    version, source = c.version_access(db, ctx, version_id)
+    version, source = c.source_preview_access(db, ctx, version_id)
     c.audit(db, ctx, 'source.read', version.id)
     cards = list(db.scalars(select(m.CardVersion).where(m.CardVersion.source_version_id == version.id)))
     data = {**entity(version, 'id', 'number', 'status', 'text', 'sha256', 'revision', 'knowledge_id', 'review_note'),
@@ -198,6 +198,8 @@ def retrieval(query: str = '', knowledge_id: str | None = None, mode: Literal['k
     if len(query) > 1000:
         fail(422, 'QUERY_TOO_LONG', '查询过长')
     if mode == 'hybrid':
+        if settings.native_teaching_pipeline:
+            fail(409, 'NATIVE_RETRIEVAL_ENABLED', '资料可使用关键词查找，AI 答疑使用 DeepTutor 检索')
         from .search import hybrid, SearchUnavailable
         try:
             return hybrid(db, ctx, query, knowledge_id)
@@ -216,6 +218,8 @@ def tutor(attempt_id: str, request: Request, ctx=Depends(context), db=Depends(ge
         fail(403, 'DIAGNOSTIC_RESTRICTION', '诊断不允许 AI 辅导')
     if a.status == 'draft':
         fail(409, 'SUBMIT_FIRST', '请先独立提交作答，再获取 AI 分析')
+    if settings.native_teaching_pipeline:
+        fail(409, 'NATIVE_TUTOR_ENABLED', '请从当前作答的 AI 辅导入口发起，原有运行记录仍可查看')
     if not settings.model_api_key or not settings.model_name or not settings.model_base_url:
         fail(503, 'MODEL_NOT_CONFIGURED', 'AI 服务未配置；审核解析、来源资料和学习流程仍可使用')
     def run():

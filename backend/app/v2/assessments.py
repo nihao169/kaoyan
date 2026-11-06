@@ -7,7 +7,7 @@ from ..auth import context
 from ..api_common import EnvelopeRoute, entity, idempotent
 from ..db import get_db
 from ..errors import fail
-from . import models as m, service as s
+from . import models as m, service as s, tutor_practice
 from .routes import Input, AnswerInput, create_run
 from .exam_resources import load_resource
 
@@ -49,8 +49,18 @@ def get_assessment(db, ctx, assessment_id, lock=False):
 def bank(project_id:str,ctx=Depends(context),db=Depends(get_db)):
     p=s.project(db,ctx,project_id)
     s.no_active_mock(db,p.id)
-    allowed = {x.id for x in s.authorized_materials(db,ctx,p)}
-    return [s.question_view(q) for q in s.rows(db,m.Question,p.id) if q.material_id in allowed]
+    allowed = {x.id: x for x in s.authorized_materials(db,ctx,p)}
+    questions = [q for q in s.rows(db,m.Question,p.id) if q.material_id in allowed]
+    if not tutor_practice.enabled(p.id):
+        return [s.question_view(q) for q in questions]
+    personal = [q for q in questions if tutor_practice.eligible(q, allowed[q.material_id])]
+    db.commit()
+    native = {q['id']: q for q in tutor_practice.call(tutor_practice.question_views(ctx.user.id, p.id, personal))}
+    db.expire_all()
+    p = s.project(db, ctx, project_id)
+    s.no_active_mock(db, p.id)
+    authorized = {x.id for x in s.authorized_materials(db, ctx, p)}
+    return [native.get(q.id) or s.question_view(q) for q in questions if q.material_id in authorized]
 
 
 @router.get('/assessments')

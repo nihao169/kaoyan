@@ -159,6 +159,9 @@ def test_content_version_pinning_and_withdrawal(clients):
     checked(teacher, '/content/sources/' + old, 'PATCH', {'text': '覆盖已发布内容', 'revision': detail['revision']}, status=409)
     checked(teacher, f'/content/sources/{new["id"]}/withdraw', 'POST', {'note': '教师发现内容冲突，暂停新使用并复核'})
     assert not checked(student, '/retrieval?query=VERSION_TWO')
+    assert checked(student, '/sources/versions/' + new['id'], status=409)['code'] == 'CONTENT_UNAVAILABLE'
+    assert checked(student, '/sources/versions/' + new['id'] + '/original', status=409)['code'] == 'CONTENT_UNAVAILABLE'
+    assert checked(teacher, '/sources/versions/' + new['id'])['status'] == 'withdrawn'
 
 
 def test_cross_user_org_class_and_private_permissions(clients):

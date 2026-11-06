@@ -29,11 +29,18 @@ class Settings(BaseSettings):
     deeptutor_native_teacher_questions: bool = False
     deeptutor_native_lessons: bool = False
     deeptutor_structured_teacher: bool = False
+    deeptutor_practice_projects: str = ''
+    deeptutor_teacher_bank_orgs: str = ''
+    deeptutor_records_projects: str = ''
     frontend_dist: Path | None = None
     legacy_retrieval_enabled: bool = True
     model_input_price: float = 0.3
     model_output_price: float = 1.2
     model_price_version: str = 'deepseek-flash-2026-10-28-peak-USD-estimate'
+
+    @property
+    def native_teaching_pipeline(self) -> bool:
+        return self.deeptutor_native_knowledge and self.deeptutor_native_teacher_questions and self.deeptutor_structured_teacher
 
 
 settings = Settings()

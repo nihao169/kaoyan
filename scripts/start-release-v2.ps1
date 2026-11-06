@@ -7,6 +7,14 @@ $env:DATABASE_URL='postgresql+psycopg://zhixing:' + [Uri]::EscapeDataString($sec
 $env:DATA_DIR=Join-Path $projectRoot 'data\v2-release'
 $env:DEEPTUTOR_URL='http://127.0.0.1:18001'
 $env:DEEPTUTOR_BRIDGE_SECRET=$secrets.bridge_secret
+$nativeFlags = @('DEEPTUTOR_NATIVE_KNOWLEDGE', 'DEEPTUTOR_NATIVE_QUESTIONS', 'DEEPTUTOR_NATIVE_LESSONS',
+    'DEEPTUTOR_NATIVE_TEACHER_QUESTIONS', 'DEEPTUTOR_STRUCTURED_TEACHER')
+foreach ($name in $nativeFlags) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+        [Environment]::SetEnvironmentVariable($name, 'true', 'Process')
+    }
+}
+if (!$env:DEEPTUTOR_TIMEOUT) { $env:DEEPTUTOR_TIMEOUT='240' }
 $env:LEGACY_RETRIEVAL_ENABLED='false'
 $env:PYTHONPATH=Join-Path $projectRoot 'backend'
 $env:PYTHONUTF8='1'

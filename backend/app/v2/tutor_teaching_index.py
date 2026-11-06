@@ -16,6 +16,27 @@ def identity(membership_id):
     return 'teaching-knowledge:' + membership_id
 
 
+def retrieve(ctx, version_id, chunks, query, authorize, name=None):
+    name = name or ensure(ctx, version_id, chunks, authorize)
+    authorize()
+    response = tutor.knowledge_request(identity(ctx.membership.id), 'search', name, query=query[:8000])
+    if response.get('state') != 'ready':
+        raise tutor.TutorError('DEEPTUTOR_TEACHING_INDEX_NOT_READY')
+    chosen = {}
+    for snippet in response.get('passages', []):
+        if not isinstance(snippet, str) or len(snippet) < 8:
+            continue
+        for chunk in chunks:
+            if chunk['chunk_id'] in chosen:
+                continue
+            if snippet in chunk['text'] or chunk['text'] in snippet:
+                start = max(0, chunk['text'].find(snippet) - 200)
+                chosen[chunk['chunk_id']] = dict(chunk, text=chunk['text'][start:start+2200])
+                if len(chosen) == 12:
+                    return list(chosen.values())
+    return list(chosen.values())
+
+
 def ensure(ctx, version_id, chunks, authorize):
     # The subset is part of the version key: a chapter selection never gives
     # the model a knowledge base covering the rest of the book.

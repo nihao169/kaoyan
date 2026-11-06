@@ -97,7 +97,8 @@ def parse_document(db, version_id, release_transaction=False):
         version.sha256 = hashlib.sha256(version.text.encode('utf-8')).hexdigest()
         doc.pages, doc.state, doc.error_code, doc.confirmed = pages, 'parsed', '', False
         source = db.get(m.Source, version.source_id)
-        db.add(m.Job(org_id=source.org_id, owner_id=source.owner_id, kind='index', resource_id=version.id))
+        if not settings.native_teaching_pipeline:
+            db.add(m.Job(org_id=source.org_id, owner_id=source.owner_id, kind='index', resource_id=version.id))
     except DocumentError:
         raise
     except subprocess.TimeoutExpired:

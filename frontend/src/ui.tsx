@@ -44,7 +44,7 @@ export function Blank({description,children}:{description:string;children?:React
 
 export function Sources({items}:{items:Evidence[]}) {
   if (!items.length) return <Alert type="info" message="没有找到可用的审核依据，请联系教师补充资料。"/>;
-  return <div className="evidence-list">{items.map(item=><div className="evidence" key={item.chunk_id}>
+  return <div className="evidence-list">{items.map(item=><div className="evidence" key={item.chunk_id+':'+item.text}>
     <div className="evidence-meta">原文依据 · 版本 {item.version} · 第 {item.position} 段</div>
     <Link to={item.url}>{item.source_title} / {item.heading}</Link><p>{item.text}</p>
   </div>)}</div>;

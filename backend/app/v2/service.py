@@ -38,6 +38,16 @@ def rows(db, cls, project_id):
     return list(db.scalars(select(cls).where(cls.project_id == project_id).order_by(cls.created_at, cls.id)))
 
 
+def accepted_mastery(db, p):
+    for task in rows(db, m.Task, p.id):
+        if task.state == 'cancelled' or not task.payload.get('mastery_run_id'):
+            continue
+        run = db.get(m.AIRun, task.payload['mastery_run_id'])
+        if run and run.project_id == p.id and run.scope_revision == p.scope_revision and run.metrics.get('mastery'):
+            return task, run.metrics['mastery']
+    return None, {}
+
+
 def no_active_mock(db, project_id):
     space_id = select(m.Project.space_id).where(m.Project.id == project_id).scalar_subquery()
     if db.scalar(select(m.Assessment.id).join(m.Project, m.Project.id == m.Assessment.project_id)
@@ -66,6 +76,8 @@ def task(db, ctx, task_id, lock=False, active=True, assessment=False):
     if not row:
         fail(404, 'NOT_FOUND', '学习任务不存在')
     p = project(db, ctx, row.project_id, lock=lock, active=active)
+    if lock:
+        db.refresh(row)
     if row.payload.get('assessment_id') and not assessment:
         fail(403, 'ASSESSMENT_ONLY', '请在本次测评中作答和查看反馈')
     if row.material_id:
@@ -160,9 +172,9 @@ def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qua
     return attempt.result
 
 
-def submit_answer(db, ctx, task_id, data, assessment=False):
+def submit_answer(db, ctx, task_id, data, assessment=False, grader=None):
     t, p = task(db, ctx, task_id, lock=True, assessment=assessment)
-    if t.state == 'completed':
+    if t.state == 'completed' or db.scalar(select(m.Attempt.id).where(m.Attempt.task_id == t.id)):
         fail(409, 'ALREADY_SUBMITTED', '本次作答已经提交')
     if t.state == 'cancelled':
         fail(409, 'TASK_CANCELLED', '任务已取消')
@@ -173,6 +185,7 @@ def submit_answer(db, ctx, task_id, data, assessment=False):
     q = db.get(m.Question, t.payload.get('question_id'))
     if not q or q.project_id != p.id:
         fail(409, 'QUESTION_REQUIRED', '请先准备一道经过校验的练习题')
+    material = material_access(db, ctx, db.get(m.Material, q.material_id))
     if q.kind == 'essay':
         if not data.response_text.strip():
             fail(422, 'ANSWER_REQUIRED', '请填写分析题作答')
@@ -185,8 +198,9 @@ def submit_answer(db, ctx, task_id, data, assessment=False):
     if q.kind == 'essay':
         attempt.result = {'state': 'pending_ai', 'evaluator': 'ai_training'}
         return attempt, p, t, q
-    correct = set(data.answer) == set(q.answer)
-    finish_answer(db, p, t, q, attempt, correct, '回答正确' if correct else '请核对原文和选项差异，再完成针对性补学')
+    correct, evaluator = grader(p, q, material, data.answer) if grader else (set(data.answer) == set(q.answer), 'rule')
+    finish_answer(db, p, t, q, attempt, correct, '回答正确' if correct else '请核对原文和选项差异，再完成针对性补学',
+                  evaluator)
     return attempt, p, t, q
 
 

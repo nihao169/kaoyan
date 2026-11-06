@@ -63,8 +63,9 @@ if os.environ.get('ZX_TEACHING_TEST_PROVIDER') == '1':
     settings.model_name = 'controlled-browser-provider'
 # Load the actual local model before advertising readiness, so browser timeouts
 # measure interactions rather than torch/model cold startup.
-from app.search import encode_segments
-encode_segments('学习准备检查')
+if not settings.native_teaching_pipeline:
+    from app.search import encode_segments
+    encode_segments('学习准备检查')
 if os.environ.get('ZX_REAL_AI') == '1':
     from app.config import settings
     from app.ai_services import TUTOR_CHAT, configured

@@ -43,7 +43,7 @@ def attempts(assignment_id: str | None = None, ctx=Depends(teacher), db=Depends(
         q = db.get(m.QuestionVersion, a.question_version_id)
         result.append({**entity(a, 'id', 'status', 'submitted_at', 'hint_level'), 'student': db.get(m.User, member.user_id).name,
                        'kind': q.kind, 'prompt': q.prompt, 'evaluation': l.current_evaluation(db, a.id),
-                       **grading_view(db, a)})
+                       **grading_view(db, ctx, a)})
     return result
 
 

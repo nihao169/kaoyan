@@ -72,6 +72,21 @@ def native_prompt(question, indexed, source_span=None):
             '只输出JSON对象：text(答复), citations(数组，每项包含material_id和8至600字逐字连续quote)。', hits)
 
 
+def mastery_outline(draft):
+    return [{'name': module['name'], 'points': [point['name'] for point in module['knowledge_points']]}
+            for module in draft['modules']]
+
+
+def current_run(db, run_id, states=('running',)):
+    run = db.get(m.AIRun, run_id)
+    project = db.get(m.Project, run.project_id)
+    if run.state not in states or project.scope_revision != run.scope_revision or project.state != 'active':
+        raise tutor.TutorError('SCOPE_CHANGED：学习项目、资料范围或运行状态已变化')
+    s.no_active_mock(db, project.id)
+    s.authorized_materials(db, context_for(db, project, run.membership_id), project)
+    return run
+
+
 def tick():
     if tutor_index.tick() or tutor_teaching_index.tick():
         return True
@@ -80,13 +95,19 @@ def tick():
     with SessionLocal.begin() as db:
         for lost in db.scalars(select(m.AIRun).where(m.AIRun.state.in_(['running', 'cancel_requested']),
                 m.AIRun.lease_until < s.clock().isoformat()).with_for_update(skip_locked=True)):
+            if (lost.state == 'running' and lost.external_id and lost.kind in ('chat', 'read', 'solve', 'evaluate')
+                    and lost.metrics.get('recovery_attempts', 0) < 1):
+                lost.metrics = {**lost.metrics, 'recovery_attempts': 1}
+                lost.state, lost.lease_until = 'queued', None
+                event(db, lost.id, 'progress', {'message': '正在恢复已创建的 DeepTutor 运行'})
+                continue
             lost.state, lost.error = 'failed', 'EXECUTION_UNCERTAIN：执行中断，请核对用量后显式重试'
             event(db, lost.id, 'failed', {'message': lost.error})
         row = db.scalar(select(m.AIRun).where(m.AIRun.state == 'queued').order_by(m.AIRun.created_at).with_for_update(skip_locked=True))
         if not row:
             return False
         row.state = 'running'
-        row.lease_until = (s.clock() + timedelta(seconds=180)).isoformat()
+        row.lease_until = (s.clock() + timedelta(seconds=max(180, tutor.settings.deeptutor_timeout+60))).isoformat()
         run_id = row.id
         event(db, run_id, 'progress', {'message': '正在准备有权限的资料片段'})
     try:
@@ -102,6 +123,9 @@ def tick():
                 raise tutor.TutorError('MATERIAL_REQUIRED：没有可用资料')
             principal = f'{ctx.user.id}:{p.id}:{p.scope_revision}'
             kind = run.kind
+            resume = {'resume_turn_id': run.external_id} if run.metrics.get('recovery_attempts') else {}
+            reading_binding, path_binding = {}, {}
+            resume_mastery = False
             native_questions = run.backend == 'native_questions'
             native = run.backend in ('native_knowledge', 'native_solve', 'native_questions', 'native_read', 'native_guide')
             capability = {'native_solve': 'deep_solve', 'native_read': 'immersive_reading', 'native_guide': 'mastery_path'}.get(run.backend, 'chat')
@@ -114,6 +138,9 @@ def tick():
                     source_span = task.payload.get('source_span') if task.payload.get('focus') else None
                 if capability == 'immersive_reading':
                     task, _ = s.task(db, ctx, run.task_id)
+                    reading_binding = task.payload.get('tutor_reading', {})
+                    if reading_binding.get('scope') != run.scope_revision:
+                        reading_binding = {}
                     materials = [item for item in materials if item.id == task.material_id]
                     if not materials:
                         raise tutor.TutorError('MATERIAL_REQUIRED：当前阅读任务的资料已不可用')
@@ -139,6 +166,28 @@ def tick():
                     solve_context = json.dumps({'题干': q.prompt, '选项': q.options, '学生作答': a.answer or a.response_text,
                                                 '参考答案': q.answer, '参考要点': q.rubric}, ensure_ascii=False)
                     question = q.prompt + '\n' + q.quote
+                if kind == 'evaluate':
+                    task, _ = s.task(db, ctx, run.task_id, assessment=True)
+                    q = db.get(m.Question, task.payload['question_id'])
+                    a = db.scalar(select(m.Attempt).where(m.Attempt.task_id == task.id))
+                    question = q.quote + '\n' + q.prompt
+                    evaluation = {'题目': q.prompt, '评分要点': q.rubric, '学生原答': a.response_text}
+                    indexed = [item for item in indexed if item[0].id == q.material_id]
+                if capability == 'mastery_path':
+                    _, path_binding = s.accepted_mastery(db, p)
+                    resume_mastery = bool(path_binding)
+                    if resume_mastery:
+                        previous = db.scalar(select(m.AIRun).where(m.AIRun.project_id == p.id,
+                            m.AIRun.scope_revision == p.scope_revision, m.AIRun.kind == 'guide', m.AIRun.state == 'succeeded')
+                            .order_by(m.AIRun.created_at.desc(), m.AIRun.id.desc()).limit(1))
+                        recent = previous.metrics.get('mastery', {}) if previous else {}
+                        if recent.get('path_id') == path_binding['path_id']:
+                            path_binding = recent
+                    mastery_name = p.title[:120]
+                    mastery_goal = f'{p.exam_year} 年考研政治；每日 {p.daily_minutes} 分钟。{question}'[:2000]
+                    syllabi = set(db.scalars(select(m.ExamResource.material_id).where(m.ExamResource.project_id == p.id,
+                        m.ExamResource.kind == 'syllabus', m.ExamResource.year == p.exam_year)))
+                    mastery_sources = sorted(indexed, key=lambda item: item[0].id not in syllabi)[:16]
             else:
                 prompt, hits = build_prompt(db, run, p, materials)
         if native:
@@ -153,27 +202,46 @@ def tick():
                     prompt += '\n请以一句支持答案的引文为命题依据。kaoyan_quote 原样复制以下数组中的一项，不添加引号或改写：' + json.dumps(exact_options, ensure_ascii=False)
             if capability == 'deep_solve':
                 prompt += '\n请逐步解释解题方法、容易混淆的选项和知识点；以下是已交卷的题目及作答：\n' + solve_context
+            if kind == 'evaluate':
+                prompt = prompt.split('\n问题：', 1)[0] + '\n以下为待评价的作答数据：' + json.dumps(evaluation, ensure_ascii=False) + (
+                    '\n逐项解释覆盖情况。只返回 JSON：correct（是否覆盖必要要点，布尔值）、score（0到100）、'
+                    'feedback（反馈）、quote（支持评价的8至600字逐字原文）。这是训练评价，不是正式成绩。')
             turn_options = {}
+            with SessionLocal() as db:
+                current_run(db, run_id)
             if capability == 'immersive_reading':
                 material, owner, name = indexed[0]
                 reader = tutor.knowledge_request(owner, 'reader', name, text=material.text)
                 if reader.get('state') != 'ready' or not reader.get('material_id'):
                     raise tutor.TutorError('DEEPTUTOR_READER_NOT_READY：精读资料尚未准备好')
                 principal = owner
-                turn_options = {'workspace_mode': 'reading', 'reading_material_id': reader['material_id'],
-                                'reading_material_revision': reader['revision'], 'reading_viewport': {'locator': 0}}
+                if reading_binding.get('material_id') != reader['material_id']:
+                    binding = asyncio.run(tutor.reading_session(owner, reader['material_id'], material.title))
+                    with SessionLocal.begin() as db:
+                        current = current_run(db, run_id)
+                        task = db.get(m.Task, current.task_id, with_for_update=True)
+                        reading_binding = {**binding, 'scope': current.scope_revision, 'material_id': reader['material_id']}
+                        task.payload = {**task.payload, 'tutor_reading': reading_binding}
+                turn_options = {'workspace_mode': 'immersive_reading', 'reading_material_id': reader['material_id'],
+                                'reading_material_revision': reader['revision'], 'reading_viewport': {'locator': 0},
+                                **{key: reading_binding[key] for key in ('session_id', 'reading_workspace_id')}}
             elif capability == 'mastery_path':
                 principal = indexed[0][1]
-                prompt += '\n请提出下一步的考研复习路径，建议先复读所引原文，再独立检查。'
-                turn_options = {'workspace_mode': 'mastery_path', 'mastery_session_mode': 'outline',
-                                'knowledge_bases': [name for _, _, name in indexed]}
+                if not path_binding:
+                    body = {'name': mastery_name, 'goal': mastery_goal, 'sources': [
+                        {'kind': 'knowledge_base', 'source_id': name, 'client_ref': name, 'label': item.title}
+                        for item, _, name in mastery_sources]}
+                    draft = asyncio.run(tutor.mastery_draft(principal, body))
+                    with SessionLocal() as db:
+                        current_run(db, run_id)
+                    if not draft.get('modules'):
+                        raise tutor.TutorError('MASTERY_EMPTY：DeepTutor 未生成可用知识点地图')
+                    path = asyncio.run(tutor.mastery_create(principal, {**body, 'modules': draft['modules'],
+                                                                      'description': draft.get('description', '')}))
+                    path_binding = {'path_id': path['path_id'], 'outline': mastery_outline(draft),
+                                    'description': draft.get('description', '')}
             with SessionLocal() as db:
-                current = db.get(m.AIRun, run_id)
-                project = db.get(m.Project, current.project_id)
-                if current.state != 'running' or project.scope_revision != current.scope_revision or project.state != 'active':
-                    raise tutor.TutorError('SCOPE_CHANGED：检索期间资料范围或运行状态已变化')
-                s.no_active_mock(db, project.id)
-                s.authorized_materials(db, context_for(db, project, current.membership_id), project)
+                current_run(db, run_id)
         def on_event(value):
             with SessionLocal.begin() as db:
                 current = db.scalar(select(m.AIRun).where(m.AIRun.id==run_id).with_for_update())
@@ -183,7 +251,14 @@ def tick():
                     current.external_id = str(value['turn_id'])
                     event(db, run_id, 'progress', {'type': value.get('type'), 'message': '基础服务正在执行'})
                 metrics = dict(current.metrics)
-                if tutor.accumulate_usage(metrics, value):
+                accounted = metrics.get('accounted_turns', [])
+                turn = value.get('turn_id')
+                if turn not in accounted and tutor.accumulate_usage(metrics, value):
+                    if turn:
+                        metrics['accounted_turns'] = [*accounted, turn]
+                if kind == 'chat' and value.get('session_id') and turn == current.external_id:
+                    metrics['chat_session'] = {'principal': principal, 'id': value['session_id']}
+                if metrics != current.metrics:
                     current.metrics = metrics
                 current.lease_until = (s.clock() + timedelta(seconds=max(180, tutor.settings.deeptutor_timeout+30))).isoformat()
                 return current.state == 'cancel_requested'
@@ -198,8 +273,25 @@ def tick():
                     raise tutor.TutorError('CITATION_INVALID：原生生成题没有可核对的授权原文')
                 candidate.update(material_id=ref['material_id'], knowledge=knowledge)
                 text = json.dumps(candidate, ensure_ascii=False)
-        elif capability in ('immersive_reading', 'mastery_path'):
-            output = asyncio.run(tutor.execute_turn(principal, prompt, capability, run_id, on_event, **turn_options))
+        elif capability == 'mastery_path' and resume_mastery:
+            output = asyncio.run(tutor.execute_turn(principal, prompt, capability, run_id, on_event,
+                workspace_mode='mastery_path', mastery_path_id=path_binding['path_id'], mastery_session_mode='study',
+                **({'session_id': path_binding['session_id']} if path_binding.get('session_id') else {})))
+            text = tutor.lesson_text(capability, output)
+            if output.session_id:
+                path_binding = {**path_binding, 'session_id': output.session_id}
+        elif capability == 'mastery_path':
+            excerpt = hits[0]
+            quote = excerpt.text.strip()[:360]
+            text = json.dumps({'text': path_binding['description'] or '按知识点地图学习，再用独立练习检查理解。',
+                               'citations': [{'material_id': excerpt.material.id, 'quote': quote}]}, ensure_ascii=False)
+        elif kind == 'evaluate' and native:
+            text = json.dumps(asyncio.run(tutor.structured_chat(principal, prompt, run_id, on_event, **resume)), ensure_ascii=False)
+        elif capability in ('immersive_reading', 'deep_solve'):
+            output = asyncio.run(tutor.execute_turn(principal, prompt, capability, run_id, on_event, **turn_options, **resume))
+            text = tutor.lesson_text(capability, output)
+        elif resume:
+            output = asyncio.run(tutor.execute_turn(principal, prompt, capability, run_id, on_event, **resume))
             text = tutor.lesson_text(capability, output)
         else:
             text = asyncio.run(tutor.execute(principal, prompt, capability, run_id, on_event))
@@ -284,18 +376,23 @@ def tick():
                               'citation_status': 'partial' if citations and invalid else 'verified' if citations else 'unverified',
                               'coverage_note': retrieval_label + ('只核对所列引文的位置与原文，答复仍需结合上下文判断。' if citations
                               else '答复没有可核对的引文。')}
+                if capability == 'mastery_path':
+                    run.metrics = {**run.metrics, 'mastery': path_binding, 'mastery_path_id': path_binding['path_id']}
+                    run.result = {**run.result, 'outline': path_binding['outline']}
                 if t and kind in ('chat', 'guide') and t.kind in ('practice', 'verification', 'review') and t.state not in ('completed', 'cancelled'):
                     t.payload = {**t.payload, 'hint_used': True}
             run.state = 'succeeded'
             run.lease_until = None
             event(db, run_id, 'done', {'state': run.state, 'result': run.result})
-            logger.info('ai_completed run=%s project=%s kind=%s citations=%d', run.id, p.id, kind, len(run.result.get('citations', [])))
+            logger.info('ai_completed run=%s project=%s kind=%s backend=%s citations=%d',
+                        run.id, p.id, kind, run.backend, len(run.result.get('citations', [])))
     except Exception as exc:
         with SessionLocal.begin() as db:
             run = db.scalar(select(m.AIRun).where(m.AIRun.id==run_id).with_for_update())
             if run.state == 'cancel_requested':
-                run.state, run.lease_until = 'cancelled', None
-                event(db, run_id, 'done', {'state': 'cancelled'})
+                run.state, run.lease_until = 'failed', None
+                run.error = 'CANCEL_UNCERTAIN：未能确认 DeepTutor 是否停止，未自动重试'
+                event(db, run_id, 'failed', {'message': run.error})
             elif run.state == 'running':
                 run.state = 'failed'
                 run.lease_until = None

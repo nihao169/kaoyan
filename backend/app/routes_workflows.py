@@ -1,16 +1,17 @@
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from . import models as m, schemas as s, workflows as w, workflow_schemas as ws
 from .auth import context, need, teacher_can_view, source_allowed
 from .db import get_db
 from .errors import fail, require
 from .api_common import EnvelopeRoute, idempotent, entity
 from .content import version_access, parse_chunks, ensure_index, audit
-from .ai_services import advisory_model, configured
+from .ai_services import TUTOR_MODELS, advisory_model, configured
 from .learning import owned_attempt, current_evaluation
 from .config import settings
+from .v2 import tutor_practice
 
 router=APIRouter(route_class=EnvelopeRoute)
 
@@ -93,9 +94,20 @@ def retry_agent(run_id: str,request: Request,ctx=Depends(context),db=Depends(get
             return w.agent_view(run)
         if not configured(run.model):
             fail(503,'MODEL_NOT_CONFIGURED','尚未配置模型')
-        # Explicit manual retry starts a fresh bounded repair cycle. Automatic recovery resumes checkpoints.
-        run.input={**run.input,'_retry':int(run.input.get('_retry',0))+1}
-        run.state,run.error_code,run.stage='queued','','等待重试'
+        recovering = run.model in TUTOR_MODELS and run.error_code in (
+            'DEEPTUTOR_TIMEOUT', 'DEEPTUTOR_RECONNECT_FAILED', 'WORKER_INTERRUPTED', 'EXECUTION_UNCERTAIN')
+        if recovering:
+            prefix = str(run.input.get('_retry', 0)) + ':'
+            turns = [value for key, value in run.metrics.get('_native_turns', {}).items() if key.startswith(prefix)]
+            if not turns or any(not item.get('id') for item in turns):
+                fail(409,'EXECUTION_UNCERTAIN','无法确认 DeepTutor 是否已接收任务，请先核对下游运行')
+        values = {'state':'queued', 'error_code':'', 'stage':'等待恢复原运行' if recovering else '等待重试'}
+        if not recovering:
+            values['input'] = {**run.input,'_retry':int(run.input.get('_retry',0))+1}
+        claimed = db.execute(update(m.AgentRun).where(m.AgentRun.id == run.id, m.AgentRun.state == 'failed').values(**values))
+        db.refresh(run)
+        if claimed.rowcount != 1:
+            return w.agent_view(run)
         db.add(m.Job(org_id=run.org_id,owner_id=run.owner_id,kind='teaching_agent',resource_id=run.id))
         return w.agent_view(run)
     return idempotent(db,ctx,request,'agent-retry:'+run_id,{},retry)
@@ -117,6 +129,18 @@ def question_bank(source_version_id: str | None=None,ctx=Depends(context),db=Dep
         result.append({**entity(q,'id','source_version_id','kind','prompt','options','answer','explanation','rubric','hints','max_score','number'),
             'knowledge':db.get(m.KnowledgePoint,q.knowledge_id).name,'source_title':source.title,'origin':'Agent生成并校验',
             'run_id':g.run_id,'option_analysis':g.option_analysis,'sources':w.question_evidence(db,ctx,q.id)})
+    if result and ctx.org_id in settings.deeptutor_teacher_bank_orgs.split():
+        org_id = ctx.org_id
+        db.commit()
+        entries = tutor_practice.call(tutor_practice.teacher_entries(org_id, result))
+        db.expire_all()
+        authorized = set()
+        for q, _ in db.execute(query):
+            version = db.get(m.SourceVersion, q.source_version_id)
+            if version.status == 'published' and source_allowed(db, ctx, db.get(m.Source, version.source_id)):
+                authorized.add(q.id)
+        return [{**item, 'prompt': entries[item['id']]['question'], 'options': entries[item['id']]['options']}
+                for item in result if item['id'] in authorized]
     return result
 
 
@@ -216,7 +240,8 @@ def start_assignment(assignment_id: str,ctx=Depends(context),db=Depends(get_db))
 def submit_assignment(assignment_id: str,request: Request,ctx=Depends(context),db=Depends(get_db)):
     need(ctx,'student')
     w.assignment_access(db,ctx,assignment_id)
-    sub=require(db.scalar(select(m.AssignmentSubmission).where(m.AssignmentSubmission.assignment_id==assignment_id,m.AssignmentSubmission.membership_id==ctx.membership.id)))
+    sub=require(db.scalar(select(m.AssignmentSubmission).where(m.AssignmentSubmission.assignment_id==assignment_id,
+        m.AssignmentSubmission.membership_id==ctx.membership.id).with_for_update()))
     return idempotent(db,ctx,request,'assignment-submit:'+sub.id,{},lambda:w.submit_group(db,ctx,sub))
 
 
@@ -263,7 +288,8 @@ def open_practice(practice_id: str,ctx=Depends(context),db=Depends(get_db)):
 @router.post('/practice-groups/{practice_id}/submit',response_model=ws.GroupOutput)
 def submit_practice(practice_id: str,request: Request,ctx=Depends(context),db=Depends(get_db)):
     need(ctx,'student')
-    practice=require(db.get(m.TargetedPractice,practice_id))
+    practice=require(db.scalar(select(m.TargetedPractice).where(m.TargetedPractice.id==practice_id,
+        m.TargetedPractice.membership_id==ctx.membership.id).with_for_update()))
     return idempotent(db,ctx,request,'practice-submit:'+practice_id,{},lambda:w.submit_group(db,ctx,practice,True))
 
 
@@ -279,6 +305,7 @@ def confirm_evaluation(attempt_id: str,data: ws.ConfirmEvaluation,request: Reque
         if suggestion.confirmed or current_evaluation(db,a.id):
             fail(409,'ALREADY_CONFIRMED','评价已确认，请刷新查看历史；修订请使用评分入口')
         run=db.get(m.AgentRun,suggestion.run_id)
+        w.require_current_agent_sources(db,ctx,run)
         for cite in run.output.get('evidence',[]):
             w.active_source(db,ctx,db.get(m.SourceChunk,cite['chunk_id']).version_id)
         result=score_essay(db,ctx,a.id,s.EvaluationInput(parts=data.parts if data.parts is not None else suggestion.parts,

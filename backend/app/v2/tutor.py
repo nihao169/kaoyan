@@ -25,6 +25,7 @@ class TurnResult:
     text: str
     result: dict = field(default_factory=dict)
     turn_id: str | None = None
+    session_id: str | None = None
 
 
 def accumulate_usage(metrics, event):
@@ -62,15 +63,73 @@ def knowledge_request(principal, operation, name, **data):
         raise TutorError('DEEPTUTOR_KNOWLEDGE_UNAVAILABLE：无法访问知识库服务') from exc
 
 
-async def execute_turn(principal, prompt, capability, submission_id, on_event, *, knowledge_bases=(), config=None, **context):
-    require_configuration()
+async def exchange(client, principal):
     payload, signature = signed_assertion(principal)
+    response = await client.post('/internal/exchange', json=payload, headers={'X-Zhixing-Signature': signature})
+    if response.status_code != 200:
+        raise TutorError('DEEPTUTOR_IDENTITY_FAILED：基础服务身份交换失败')
+    return response.json()['token']
+
+
+async def native_request(principal, method, path, *, body=None, params=None, timeout=40, missing_ok=False):
+    require_configuration()
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
-            response = await client.post(settings.deeptutor_url.rstrip('/') + '/internal/exchange', json=payload, headers={'X-Zhixing-Signature': signature})
-            if response.status_code != 200:
-                raise TutorError('DEEPTUTOR_IDENTITY_FAILED：基础服务身份交换失败')
-            token = response.json()['token']
+        async with httpx.AsyncClient(base_url=settings.deeptutor_url.rstrip('/'), timeout=timeout, trust_env=False) as client:
+            token = await exchange(client, principal)
+            response = await client.request(method, path, cookies={'dt_token': token}, json=body, params=params)
+            if missing_ok and response.status_code == 204:
+                return {}
+            if not response.is_success:
+                raise TutorError(f'DEEPTUTOR_NATIVE_REQUEST_FAILED：原生服务返回 HTTP {response.status_code}')
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError('invalid native response')
+            return result
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        raise TutorError('DEEPTUTOR_NATIVE_UNAVAILABLE：无法确认原生服务结果，未自动重新提交') from exc
+
+
+async def index_original(principal, name, original):
+    require_configuration()
+    try:
+        async with httpx.AsyncClient(base_url=settings.deeptutor_url.rstrip('/'), timeout=40, trust_env=False) as client:
+            token = await exchange(client, principal)
+            with original.open('rb') as handle:
+                response = await client.post('/api/knowledge-bases', cookies={'dt_token': token},
+                    data={'name': name, 'rag_provider': 'llamaindex'}, files={'files': (original.name, handle)})
+            if response.status_code in (415, 422):
+                return 'unsupported'
+            if not response.is_success and response.status_code != 409:
+                raise TutorError(f'DEEPTUTOR_NATIVE_REQUEST_FAILED：上传原件返回 HTTP {response.status_code}')
+            return 'indexing'
+    except (httpx.HTTPError, OSError, KeyError, ValueError) as exc:
+        raise TutorError('DEEPTUTOR_NATIVE_UNAVAILABLE：无法确认原件上传结果') from exc
+
+
+async def reading_session(principal, material_id, title):
+    workspace = await native_request(principal, 'POST', '/api/reading/workspaces',
+                                     body={'title': title[:300], 'material_ids': [material_id]})
+    workspace_id = workspace['workspace']['workspace_id']
+    session = await native_request(principal, 'POST', f'/api/reading/workspaces/{workspace_id}/sessions',
+                                   body={'title': title[:100], 'active_material_id': material_id})
+    return {'reading_workspace_id': workspace_id, 'session_id': session['session']['session_id']}
+
+
+async def mastery_draft(principal, body):
+    return await native_request(principal, 'POST', '/api/mastery-paths/topics/draft', body=body,
+                                timeout=settings.deeptutor_timeout)
+
+
+async def mastery_create(principal, body):
+    return await native_request(principal, 'POST', '/api/mastery-paths/topics', body=body)
+
+
+async def execute_turn(principal, prompt, capability, submission_id, on_event, *, knowledge_bases=(), config=None,
+                       resume_turn_id=None, **context):
+    require_configuration()
+    try:
+        async with httpx.AsyncClient(base_url=settings.deeptutor_url.rstrip('/'), timeout=20, trust_env=False) as client:
+            token = await exchange(client, principal)
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise TutorError('DEEPTUTOR_UNAVAILABLE：无法连接基础服务或交换身份') from exc
     from websockets.asyncio.client import connect
@@ -79,7 +138,8 @@ async def execute_turn(principal, prompt, capability, submission_id, on_event, *
     content = []
     result = {}
     cancel_sent = False
-    turn_id, cursor = None, 0
+    turn_id, cursor = resume_turn_id, 0
+    session_id = context.get('session_id')
     finished = False
     async with asyncio.timeout(settings.deeptutor_timeout):
         for attempt in range(3):
@@ -101,6 +161,7 @@ async def execute_turn(principal, prompt, capability, submission_id, on_event, *
                                 cancel_sent = True
                             continue
                         turn_id = event.get('turn_id') or turn_id
+                        session_id = event.get('session_id') or session_id
                         seq = event.get('seq')
                         if isinstance(seq, int) and seq > 0:
                             if seq <= cursor:
@@ -116,6 +177,10 @@ async def execute_turn(principal, prompt, capability, submission_id, on_event, *
                         if event.get('type') == 'result' and isinstance(event.get('metadata'), dict):
                             result = event['metadata']
                         if event.get('type') in ('error', 'protocol_error'):
+                            metadata = event.get('metadata') or {}
+                            if (metadata.get('status') == 'failed' and metadata.get('retryable') is True
+                                    and metadata.get('error_code') == 'provider_transport'):
+                                raise TutorError('DEEPTUTOR_PROVIDER_TRANSPORT')
                             code = str(event.get('error_code', 'execution_failed'))[:100]
                             raise TutorError('DEEPTUTOR_EXECUTION_FAILED：' + code)
                         if event.get('type') == 'wait_for_input':
@@ -140,7 +205,7 @@ async def execute_turn(principal, prompt, capability, submission_id, on_event, *
         raise TutorError('DEEPTUTOR_RECONNECT_FAILED：无法恢复已有运行，未重新提交')
     if not ''.join(content).strip() and not result:
         raise TutorError('DEEPTUTOR_EMPTY_RESULT：基础服务未返回内容')
-    return TurnResult(''.join(content), result, turn_id)
+    return TurnResult(''.join(content), result, turn_id, session_id)
 
 
 async def execute(principal, prompt, capability, submission_id, on_event):
@@ -175,11 +240,11 @@ def quote_options(excerpts):
     return list(candidates)
 
 
-async def generate_questions(principal, prompt, counts, submission_id, on_event, *, knowledge_bases=()):
+async def generate_questions(principal, prompt, counts, submission_id, on_event, *, knowledge_bases=(), **context):
     native_counts = {QUESTION_TYPES[kind]: count for kind, count in counts.items() if count}
     turn = await execute_turn(principal, prompt, 'deep_question', submission_id, on_event,
         knowledge_bases=knowledge_bases, config={'mode': 'custom', 'topic': prompt,
-        'num_questions': sum(native_counts.values()), 'question_types': list(native_counts), 'per_type_counts': native_counts})
+        'num_questions': sum(native_counts.values()), 'question_types': list(native_counts), 'per_type_counts': native_counts}, **context)
     if not turn.text and not turn.result:
         return []
     summary = turn.result.get('summary', {})
@@ -211,8 +276,8 @@ def json_result(text):
     return json.loads(text)
 
 
-async def structured_chat(principal, prompt, submission_id, on_event):
-    turn = await execute_turn(principal, prompt, 'chat', submission_id, on_event)
+async def structured_chat(principal, prompt, submission_id, on_event, **context):
+    turn = await execute_turn(principal, prompt, 'chat', submission_id, on_event, **context)
     for candidate in (turn.text, turn.result.get('response')):
         if isinstance(candidate, str) and candidate.strip():
             try:

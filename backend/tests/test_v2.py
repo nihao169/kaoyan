@@ -111,6 +111,100 @@ def test_native_index_uses_authorized_version_and_cleans_revoked_copy(clients, m
     assert tutor_index.tick() and not copies
 
 
+def test_expired_worker_subscribes_to_known_turn_without_resubmitting(clients, monkeypatch):
+    from app.v2 import tutor, worker
+
+    student, _, _ = clients
+    p, _, reading = setup_project(student)
+    run = call(student, f'/learning-projects/{p["id"]}/ai-runs', 'POST',
+               {'prompt': '检验认识的标准是什么？', 'task_id': reading['id']}, 202)
+    with SessionLocal.begin() as db:
+        row = db.get(m.AIRun, run['run_id'])
+        row.state = 'running'
+        row.external_id = 'known-turn'
+        row.lease_until = (s.clock()-timedelta(seconds=1)).isoformat()
+
+    async def subscribe(principal, prompt, capability, submission_id, on_event, **options):
+        assert options == {'resume_turn_id': 'known-turn'}
+        return tutor.TurnResult('恢复原运行的答复', turn_id='known-turn')
+
+    monkeypatch.setattr(tutor, 'execute_turn', subscribe)
+    assert worker.tick()
+    status = call(student, '/ai-runs/'+run['run_id'])
+    assert status['state'] == 'succeeded' and status['result']['text'] == '恢复原运行的答复'
+
+
+def test_native_reading_reuses_session_and_mastery_requires_acceptance(clients, monkeypatch):
+    from app.config import settings
+    from app.v2 import tutor, worker
+
+    student, teacher, _ = clients
+    p, material, reading = setup_project(student)
+    base = '/learning-projects/' + p['id']
+    quote = '实践是检验认识真理性的唯一标准'
+    monkeypatch.setattr(settings, 'deeptutor_native_knowledge', True)
+    monkeypatch.setattr(settings, 'deeptutor_native_lessons', True)
+    with SessionLocal.begin() as db:
+        row = db.get(m.Material, material['id'])
+        member_id = db.get(m.Project, p['id']).space_id
+        from app import models as old
+        member_id = db.scalar(select(old.Membership.id).where(old.Membership.user_id == db.get(m.PersonalSpace, member_id).user_id))
+        db.add(m.TutorIndex(material_id=row.id, membership_id=member_id, sha256=row.sha256, principal='owner',
+                           name='kb', state='ready', next_at=(s.clock()+timedelta(days=1)).isoformat()))
+
+    def knowledge(owner, op, name, **data):
+        assert (owner, name) == ('owner', 'kb')
+        return {'state': 'ready', 'passages': [quote], 'material_id': 'native-material', 'revision': 'r1'}
+
+    sessions, turns = [], []
+
+    async def reading_session(*args):
+        sessions.append(args)
+        return {'session_id': 'native-session', 'reading_workspace_id': 'native-workspace'}
+
+    async def turn(principal, prompt, capability, submission_id, on_event, **context):
+        turns.append((capability, context))
+        return tutor.TurnResult('继续解释所学内容', session_id='native-study')
+
+    async def draft(principal, body):
+        assert body['sources'][0]['source_id'] == 'kb' and '2027' in body['goal']
+        return {'modules': [{'name': '认识论', 'knowledge_points': [{'name': '实践标准'}]}]}
+
+    async def create(principal, body):
+        assert body['modules']
+        return {'path_id': 'native-path'}
+
+    monkeypatch.setattr(tutor, 'knowledge_request', knowledge)
+    monkeypatch.setattr(tutor, 'reading_session', reading_session)
+    monkeypatch.setattr(tutor, 'execute_turn', turn)
+    monkeypatch.setattr(tutor, 'mastery_draft', draft)
+    monkeypatch.setattr(tutor, 'mastery_create', create)
+
+    def run(kind, task_id):
+        result = call(student, base+'/ai-runs', 'POST', {'kind': kind, 'prompt': '实践的作用是什么？', 'task_id': task_id}, 202)
+        assert worker.tick()
+        status = call(student, '/ai-runs/'+result['run_id'])
+        assert status['state'] == 'succeeded', status
+        return status
+
+    for _ in range(2):
+        run('read', reading['id'])
+    assert len(sessions) == 1 and [options['session_id'] for _, options in turns] == ['native-session']*2
+    guide = run('guide', reading['id'])
+    assert not call(student, base)['mastery_outline']
+    call(teacher, '/ai-runs/'+guide['id']+'/accept-guide', 'POST', status=404)
+    task = call(student, '/ai-runs/'+guide['id']+'/accept-guide', 'POST')['task_id']
+    assert call(student, base)['mastery_outline'] == [{'name': '认识论', 'points': ['实践标准']}]
+    assert call(student, '/ai-runs/'+guide['id']+'/accept-guide', 'POST')['task_id'] == task
+    run('guide', task)
+    run('guide', task)
+    assert turns[-2][1]['mastery_path_id'] == 'native-path' and turns[-1][1]['session_id'] == 'native-study'
+    assert not call(student, base+'/report')['evidence_count']
+    call(student, base+'/materials/'+material['id'], 'DELETE')
+    assert not call(student, base)['mastery_outline']
+    call(student, '/ai-runs/'+guide['id'], status=403)
+
+
 def test_pdf_citation_opens_correct_original_page(clients):
     import pymupdf
     student, teacher, _ = clients

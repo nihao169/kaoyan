@@ -24,6 +24,10 @@ def version_access(db, ctx, version_id, published=False):
     return version, source
 
 
+def source_preview_access(db, ctx, version_id):
+    return version_access(db, ctx, version_id, published=not (ctx.has('teacher') or ctx.has('admin')))
+
+
 def parse_chunks(db, version):
     if db.scalar(select(m.SourceChunk.id).where(m.SourceChunk.version_id == version.id)):
         return
@@ -132,6 +136,8 @@ def transition(db, ctx, version_id, action, note):
 def ensure_index(db, version_id):
     from .search import fingerprint
     ids = list(db.scalars(select(m.SourceChunk.id).where(m.SourceChunk.version_id == version_id)))
+    if settings.native_teaching_pipeline and ids:
+        return  # DeepTutor indexes the authorized chapter selection when its teaching run begins.
     indexed = len(list(db.scalars(select(m.ChunkEmbedding.id).where(m.ChunkEmbedding.chunk_id.in_(ids), m.ChunkEmbedding.model_revision == fingerprint()))))
     if not ids or indexed != len(ids):
         fail(409, 'INDEX_NOT_READY', '请等待后台索引完成，或点击重建索引后再提交审核')
@@ -163,7 +169,8 @@ def new_version(db, ctx, version_id):
         db.add(m.QuestionVersion(question_id=q.question_id, number=number, org_id=q.org_id, source_version_id=version.id, knowledge_id=q.knowledge_id, policy_id=q.policy_id, kind=q.kind, prompt=q.prompt, options=q.options, answer=q.answer, explanation=q.explanation, rubric=q.rubric, hints=q.hints, max_score=q.max_score))
     audit(db, ctx, 'content.new_version', version.id)
     parse_chunks(db, version)
-    db.add(m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='index', resource_id=version.id))
+    if not settings.native_teaching_pipeline:
+        db.add(m.Job(org_id=ctx.org_id, owner_id=ctx.user.id, kind='index', resource_id=version.id))
     return version
 
 
@@ -187,8 +194,8 @@ def available_questions(db, ctx, knowledge_id=None):
 def retrieve(db, ctx, query='', knowledge_id=None, version_id=None, limit=5):
     stmt = select(m.SourceChunk, m.SourceVersion, m.Source).join(m.SourceVersion, m.SourceChunk.version_id == m.SourceVersion.id).join(m.Source, m.SourceVersion.source_id == m.Source.id).where(m.Source.org_id == ctx.org_id)
     if version_id:
-        # Historical learning evidence remains bound to the version actually used.
-        stmt = stmt.where(m.SourceVersion.id == version_id, m.SourceVersion.status.in_(['published', 'withdrawn']))
+        statuses = ['published', 'withdrawn'] if ctx.has('teacher') or ctx.has('admin') else ['published']
+        stmt = stmt.where(m.SourceVersion.id == version_id, m.SourceVersion.status.in_(statuses))
     else:
         stmt = stmt.where(m.SourceVersion.status == 'published')
     if knowledge_id:

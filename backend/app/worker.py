@@ -29,8 +29,11 @@ def tick(include_v2=True):
             elif expired.kind == 'teaching_agent':
                 run = db.get(m.AgentRun, expired.resource_id)
                 if run.model in TUTOR_MODELS:
-                    expired.state, expired.error_code = 'failed', 'EXECUTION_UNCERTAIN'
-                    run.stage = '基础服务状态待核对，请人工重试'
+                    prefix = str(run.input.get('_retry', 0)) + ':'
+                    turns = [value for key, value in run.metrics.get('_native_turns', {}).items() if key.startswith(prefix)]
+                    if not turns or any(not item.get('id') for item in turns):
+                        expired.state, expired.error_code = 'failed', 'EXECUTION_UNCERTAIN'
+                    run.stage = '等待恢复原运行' if expired.state == 'queued' else '基础服务状态待核对'
                 run.state, run.error_code = expired.state, expired.error_code
         job = db.scalar(select(m.Job).where(m.Job.state == 'queued').order_by(m.Job.created_at))
         job_id = None
@@ -77,7 +80,9 @@ def tick(include_v2=True):
                 version = db.get(m.SourceVersion, job.resource_id)
                 parse_chunks(db, version)
                 source = db.get(m.Source, version.source_id)
-                db.add(m.Job(org_id=source.org_id, owner_id=source.owner_id, kind='index', resource_id=version.id))
+                from .config import settings
+                if not settings.native_teaching_pipeline:
+                    db.add(m.Job(org_id=source.org_id, owner_id=source.owner_id, kind='index', resource_id=version.id))
             elif job.kind in ('tutor', 'ai_request', 'document', 'index', 'teaching_agent'):
                 pass
             else:

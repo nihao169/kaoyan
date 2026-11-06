@@ -33,6 +33,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from app.config import settings
 from app.db import SessionLocal
 from app.main import app
 from app.seed import seed
@@ -120,12 +121,30 @@ try:
     result = process(run)
     if result['state'] != 'succeeded':
         raise RuntimeError(result['error'])
+    assert result['backend'] == 'native_knowledge'
     citation = next(c for c in result['result']['citations'] if c['quote'] in quote and '蓝色铜铃' in c['quote'])
     assert citation['page'] == 21 and citation['start'] > 12000
     source = base+'/materials/'+material['id']
     excerpt = f"{source}/excerpt?sha256={citation['sha256']}&start={citation['start']}&end={citation['end']}"
     assert call(excerpt)['quote'] == citation['quote']
     call(excerpt, client=other, expected=404)
+    if '--phase2' in sys.argv:
+        records = base + '/notes'
+        call(records, 'POST', {'title': '原文笔记', 'text': quote, 'material_id': material['id']}, expected=201)
+        before = call(records)
+        settings.deeptutor_records_projects = project['id']
+        assert call(records + '/migrate', 'POST')['count'] == 1
+        assert call(records) == before
+        card = call(records, 'POST', {'title': '验收标记', 'text': '蓝色铜铃', 'kind': 'flashcard'}, expected=201)
+        assert card['id'] in {item['id'] for item in call(records)}
+        history = base + '/chat-history/' + run['run_id']
+        with SessionLocal() as db:
+            assert db.get(m.AIRun, run['run_id']).metrics['chat_session']['id']
+        assert call(history)['text'] == result['result']['text']
+        call(history, client=other, expected=404)
+        settings.deeptutor_records_projects = ''
+        assert call(records + '/restore', 'POST')['count'] == 2
+        print('PASS: real native notebook, flashcard, chat history, and record rollback.', flush=True)
     if '--lessons' in sys.argv:
         reading, = [task for task in call(base)['tasks'] if task['material_id'] == material['id'] and task['kind'] == 'reading']
         for kind in ('read', 'guide', 'solve'):
@@ -147,10 +166,21 @@ try:
             state = process(lesson)
             if state['state'] != 'succeeded':
                 raise RuntimeError(kind+': '+str(state['error']))
+            assert state['backend'] == 'native_'+kind
             assert state['result']['text'].strip(), kind
+            if kind == 'read':
+                with SessionLocal() as db:
+                    binding = db.get(m.Task, task_id).payload['tutor_reading']
+                follow_up = process(call(base+'/ai-runs', 'POST', {'kind':'read', 'task_id':task_id,
+                    'prompt':'继续解释刚才引用的验收标记。'}, expected=202))
+                assert follow_up['state'] == 'succeeded', follow_up
+                with SessionLocal() as db:
+                    assert db.get(m.Task, task_id).payload['tutor_reading'] == binding
             if kind == 'guide':
+                assert state['result']['outline'] and not call(base)['mastery_outline']
                 accepted = call('/ai-runs/'+lesson['run_id']+'/accept-guide', 'POST')
                 assert call('/ai-runs/'+lesson['run_id']+'/accept-guide', 'POST') == accepted
+                assert call(base)['mastery_outline'] == state['result']['outline']
             print('PASS: real DeepTutor', kind, flush=True)
     call(source, 'DELETE')
     call('/ai-runs/'+run['run_id'], expected=403)
@@ -165,6 +195,8 @@ try:
         study = call('/learning-projects', 'POST', {'title':'考研练习验收', 'subject_id':subject,
                                                    'exam_year':2027, 'daily_minutes':30}, expected=201)
         path = '/learning-projects/'+study['id']
+        if '--phase2' in sys.argv:
+            settings.deeptutor_practice_projects = study['id']
         source_text = ('实践是认识的来源，是认识发展的动力，是检验认识真理性的唯一标准，也是认识的目的。'
                        '正确的认识能够促进实践，错误的认识会阻碍实践。认识过程具有反复性和无限性。真理是具体的、有条件的。')
         notes = call(path+'/materials', 'POST', {'title':'实践与认识', 'text':source_text}, expected=201)
@@ -181,18 +213,27 @@ try:
             state = process(call(session_path+'/prepare', 'POST', {'kind':kind}, expected=202))
             if state['state'] != 'succeeded':
                 raise RuntimeError(kind+': '+str(state['error']))
+            assert state['backend'] == 'native_questions'
             with SessionLocal() as db:
                 question = db.get(m.Question, state['result']['question_id'])
                 assert question.kind == kind and question.quote in source_text
                 answer = question.answer
+            if '--phase2' in sys.argv:
+                bank = call(path + '/question-bank')
+                assert any(item['id'] == state['result']['question_id'] for item in bank)
+                assert all({'answer', 'explanation', 'quote', 'rubric'}.isdisjoint(item) for item in bank)
+                call(path + '/question-bank', client=other, expected=404)
             submitted = call(session_path+'/submit', 'POST', {'answer':answer, 'response_text':source_text if kind == 'essay' else '',
                                                                'confidence':'normal'})['result']
             if kind == 'essay':
                 assert submitted['state'] == 'pending_ai'
                 evaluation = process(submitted)
                 assert evaluation['state'] == 'succeeded' and evaluation['result']['label'] == 'AI训练评价，不是正式成绩', evaluation
+                assert evaluation['backend'] == 'native_knowledge'
             else:
                 assert submitted['correct'] is True, submitted
+                if '--phase2' in sys.argv:
+                    assert submitted['evaluator'] == 'deeptutor_practice'
             print('PASS: real student question and submission', kind, flush=True)
 finally:
     student.close()

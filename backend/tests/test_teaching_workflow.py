@@ -98,6 +98,92 @@ def test_default_generation_and_settings():
         GenerationSettings(single=30,multiple=1,essay=0)
 
 
+def test_native_teacher_can_queue_generation_without_legacy_index(clients, monkeypatch):
+    _, teacher, admin = clients
+    for flag in ('deeptutor_native_knowledge', 'deeptutor_native_teacher_questions', 'deeptutor_structured_teacher'):
+        monkeypatch.setattr(settings, flag, True)
+    monkeypatch.setattr(settings, 'deeptutor_url', 'http://native.invalid')
+    monkeypatch.setattr(settings, 'deeptutor_bridge_secret', 'x'*40)
+    source = checked(teacher, '/content/sources', 'POST', {'title':'原生出题资料',
+        'text':'实践是认识的来源，认识必须接受实践检验。', 'rights':'测试资料'}, status=202)
+    drain()
+    index = checked(teacher, f'/content/indexes/{source["id"]}')
+    assert index['state'] == 'ready' and index['backend'] == 'deeptutor'
+    with SessionLocal() as db:
+        assert not db.scalar(select(m.Job.id).where(m.Job.kind == 'index', m.Job.resource_id == source['id']))
+    run = checked(teacher, f'/content/sources/{source["id"]}/enable', 'POST', {'single':1,'multiple':0,'essay':0}, status=202)
+    assert run['model'] == 'deeptutor:deep-question'
+    with SessionLocal() as db:
+        assert db.get(m.AgentRun, run['id']).input['_native_retrieval'] is True
+    def native_ping(model, principal, request_id, prompt, metrics):
+        assert model == 'deeptutor:structured-chat' and principal.startswith('v1:health:')
+        return {'ok': True}
+
+    monkeypatch.setattr('app.routes_extensions.advisory_completion', native_ping)
+    assert checked(admin, '/ai/status')['provider'] == 'DeepTutor'
+    assert checked(admin, '/ai/connection-test', 'POST')['connected'] is True
+
+
+@pytest.mark.parametrize('acknowledged', [True, False])
+def test_native_teacher_retries_original_turn_only(clients, monkeypatch, acknowledged):
+    _, teacher, _ = clients
+    monkeypatch.setattr(settings, 'deeptutor_native_teacher_questions', True)
+    monkeypatch.setattr(settings, 'deeptutor_url', 'http://native.invalid')
+    monkeypatch.setattr(settings, 'deeptutor_bridge_secret', 'x'*40)
+    submissions = []
+
+    async def chat(principal, prompt, submission, record, *, resume_turn_id=None):
+        submissions.append((submission, resume_turn_id))
+        if len(submissions) == 1:
+            if acknowledged:
+                record({'type':'turn_started', 'turn_id':'native-extract'})
+            raise TimeoutError()
+        if resume_turn_id == 'native-extract':
+            evidence = json.loads(prompt.rsplit('\n', 1)[-1])['evidence'][0]
+            record({'type':'done', 'turn_id':resume_turn_id,
+                    'metadata':{'usage_summary':{'total_calls':1}}})
+            return {'topics':[{'name':'实践与认识','section':'讲义','card':'实践是认识的来源，也是检验认识的标准。',
+                               'evidence':[{'chunk_id':evidence['chunk_id'],'quote':'实践是认识的来源'}]}],
+                    'coverage':'覆盖实践与认识的关系'}
+        raise TimeoutError()  # Stop at the next distinct step.
+
+    monkeypatch.setattr('app.v2.tutor.structured_chat', chat)
+    _, failed = material(teacher, {'single':1,'multiple':0,'essay':0})
+    assert failed['error_code'] == 'DEEPTUTOR_TIMEOUT'
+    assert '_native_turns' not in failed['metrics']
+    retried = checked(teacher, '/agent-runs/'+failed['id']+'/retry', 'POST', {},
+                      status=202 if acknowledged else 409)
+    drain()
+    if acknowledged:
+        assert submissions[1] == (submissions[0][0], 'native-extract')
+        assert len(submissions) == 3 and submissions[2][0].endswith(':verify')
+        assert checked(teacher, '/agent-runs/'+failed['id'])['metrics']['total_calls'] == 1
+    else:
+        assert retried['code'] == 'EXECUTION_UNCERTAIN'
+        assert len(submissions) == 1
+    assert checked(teacher, '/teaching/questions') == []
+
+
+def test_native_teacher_retries_only_terminal_chat_step(clients, monkeypatch):
+    _, teacher, _ = clients
+    monkeypatch.setattr(settings, 'deeptutor_native_teacher_questions', True)
+    monkeypatch.setattr(settings, 'deeptutor_url', 'http://native.invalid')
+    monkeypatch.setattr(settings, 'deeptutor_bridge_secret', 'x'*40)
+    from app.v2.tutor import TutorError
+    calls = []
+
+    async def chat(principal, prompt, submission, record):
+        calls.append(submission)
+        record({'type':'turn_started', 'turn_id':f'turn-{len(calls)}'})
+        raise TutorError('DEEPTUTOR_PROVIDER_TRANSPORT')
+
+    monkeypatch.setattr('app.v2.tutor.structured_chat', chat)
+    _, failed = material(teacher, {'single':1,'multiple':0,'essay':0})
+    assert failed['error_code'] == 'DEEPTUTOR_PROVIDER_TRANSPORT'
+    assert len(calls) == 2 and calls[1] == calls[0] + ':transport-retry'
+    assert checked(teacher, '/teaching/questions') == []
+
+
 def test_teacher_agent_assignment_manual_diagnosis_and_private_practice(clients,provider):
     student,teacher,admin=clients
     vid,generated=material(teacher)
@@ -111,7 +197,23 @@ def test_teacher_agent_assignment_manual_diagnosis_and_private_practice(clients,
     bank=checked(teacher,'/teaching/questions')
     assert len(bank)==3 and all(q['sources'] for q in bank)
     assignment=assign(teacher,[q['id'] for q in bank])
-    group=checked(student,'/assignments/'+assignment['id']+'/start','POST')
+    start_url = '/assignments/'+assignment['id']+'/start'
+    if settings.database_url.startswith('postgresql'):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        start_gate = Barrier(2)
+
+        def start_group():
+            start_gate.wait(timeout=5)
+            return checked(student, start_url, 'POST')
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            requests = [pool.submit(start_group) for _ in range(2)]
+            group, duplicate = [request.result(timeout=15) for request in requests]
+        assert group == duplicate
+    else:
+        group = checked(student, start_url, 'POST')
     assert group['state']=='draft'
     assert all(e['attempt']['question'].get('answer') is None for e in group['entries'])
     incomplete=checked(student,'/assignments/'+assignment['id']+'/submit','POST',status=422)
@@ -229,6 +331,48 @@ def test_default_twelve_questions_and_assignment_version_snapshot(clients,provid
     group=checked(student,'/assignments/'+assignment['id']+'/start','POST')
     assert group['entries'][0]['attempt']['question']['id']==original['id']
     assert group['entries'][0]['attempt']['question']['prompt']==original['prompt']
+
+
+def test_native_teacher_bank_respects_organization_and_role(clients, provider, monkeypatch):
+    from app.auth import passwords
+    from app.v2 import tutor
+    from conftest import login_client
+
+    student, teacher, _ = clients
+    _, run = material(teacher, {'single': 1, 'multiple': 0, 'essay': 0})
+    assert run['state'] == 'succeeded'
+    with SessionLocal.begin() as db:
+        original_user = db.scalar(select(m.User).where(m.User.username == 'teacher'))
+        original_org = db.scalar(select(m.Membership).where(m.Membership.user_id == original_user.id)).org_id
+        foreign = m.Organization(name='隔离机构')
+        db.add(foreign)
+        db.flush()
+        for username, org in [('peer-teacher', original_org), ('foreign-teacher', foreign.id)]:
+            user = m.User(username=username, name=username, password_hash=passwords.hash('Zhixing2026!'))
+            db.add(user)
+            db.flush()
+            membership = m.Membership(user_id=user.id, org_id=org)
+            db.add(membership)
+            db.flush()
+            db.add(m.RoleAssignment(membership_id=membership.id, role='teacher'))
+    monkeypatch.setattr(settings, 'deeptutor_teacher_bank_orgs', original_org)
+    stored = {}
+
+    async def request(owner, method, path, *, body=None, params=None, **_):
+        assert owner == f'{original_org}:teacher-bank'
+        if method == 'GET':
+            return stored.get(params['question_id'], {})
+        assert path.endswith('/entries/upsert')
+        item = {'id': 1, **body}
+        stored[body['question_id']] = item
+        return item
+
+    monkeypatch.setattr(tutor, 'native_request', request)
+    with login_client('peer-teacher') as peer, login_client('foreign-teacher') as outsider:
+        assert checked(peer, '/teaching/questions') == checked(teacher, '/teaching/questions')
+        assert len(stored) == 1
+        assert checked(outsider, '/teaching/questions') == []
+        checked(student, '/teaching/questions', status=403)
 
 
 def test_malformed_json_uses_bounded_repair(clients,provider,monkeypatch):

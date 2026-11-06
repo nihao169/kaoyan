@@ -36,8 +36,12 @@ test('上传原文、Agent出题、教师作业、整组提交、手动错题诊
     await teacher.locator('.ant-table-thead input[type=checkbox]').check();await teacher.getByRole('button',{name:'布置所选题目（3）',exact:true}).click();
     const title='Agent作业验收';await teacher.getByLabel('作业名称',{exact:true}).fill(title);await teacher.getByLabel('班级',{exact:true}).click();await teacher.getByTitle('政治基础研习班',{exact:true}).last().click();
     const published=teacher.waitForResponse(r=>r.url().endsWith('/teacher/assignments')&&r.request().method()==='POST');await teacher.getByRole('button',{name:'发布作业',exact:true}).click();const assignment=(await (await published).json()).data;
-    await login(student,'student');await student.getByRole('link',{name:'教师作业',exact:true}).click();await expect(student.getByRole('heading',{name:title,exact:true})).toBeVisible();await student.getByRole('button',{name:'开始作业',exact:true}).click();
+    await login(student,'student');await student.getByRole('link',{name:'教师作业',exact:true}).click();await expect(student.getByRole('heading',{name:title,exact:true})).toBeVisible();
+    const started=student.waitForResponse(r=>r.url().endsWith('/assignments/'+assignment.id+'/start')&&r.request().method()==='POST');
+    await student.getByRole('button',{name:'开始作业',exact:true}).click();
     const group=await data(student,'/assignments/'+assignment.id+'/start','POST');
+    const firstStart=await started;expect(firstStart.ok(),await firstStart.text()).toBeTruthy();
+    expect((await firstStart.json()).data.id).toBe(group.id);
     for(let i=0;i<group.entries.length;i++){
       await student.getByRole('button',{name:`切换第${i+1}题`,exact:true}).click();const entry=group.entries[i];const q=entry.attempt.question;
       await expect(student.getByRole('heading',{name:q.prompt,exact:true})).toBeVisible();

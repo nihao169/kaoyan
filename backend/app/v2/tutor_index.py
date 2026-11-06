@@ -1,4 +1,5 @@
 """Versioned, project-scoped copies for DeepTutor's native retrieval."""
+import asyncio
 import hashlib
 from datetime import timedelta
 from fastapi import HTTPException
@@ -70,6 +71,13 @@ def tick():
         remove = not allowed(db, row, material)
         row_id, owner, name, previous = row.id, row.principal, row.name, row.state
         text = material.text if not remove else ''
+        original = None
+        if not remove and material.original_sha256:
+            folder = settings.data_dir / 'v2-originals' / material.project_id
+            # The fixed retrieval adapter verifies contiguous extracted text; its PDF results
+            # do not preserve page provenance. Keep the proven per-page PDF input in that case.
+            original = next((path for ext in ('txt', 'md') if
+                             (path := folder / f'{material.id}.{ext}').is_file()), None)
         row.next_at = (now + timedelta(seconds=90)).isoformat()
     state, error = previous, ''
     delay = 60
@@ -83,7 +91,9 @@ def tick():
                 tutor.knowledge_request(owner, 'delete', name)
                 state = 'missing'
             if state == 'missing':
-                state = tutor.knowledge_request(owner, 'create', name, text=text)['state']
+                state = asyncio.run(tutor.index_original(owner, name, original)) if original else 'unsupported'
+                if state == 'unsupported':
+                    state = tutor.knowledge_request(owner, 'create', name, text=text)['state']
             if state == 'indexing':
                 delay = 4
             elif state == 'failed':
