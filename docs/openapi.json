@@ -14264,6 +14264,743 @@
           }
         }
       }
+    },
+    "/api/v2/learning-projects/{project_id}/learning/practice": {
+      "get": {
+        "summary": "Practice List",
+        "operationId": "practice_list_api_v2_learning_projects__project_id__learning_practice_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/learning-projects/{project_id}/learning/practice/{entry_id}": {
+      "get": {
+        "summary": "Get Practice",
+        "operationId": "get_practice_api_v2_learning_projects__project_id__learning_practice__entry_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Answer Practice",
+        "operationId": "answer_practice_api_v2_learning_projects__project_id__learning_practice__entry_id__post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PracticeAnswer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/learning-projects/{project_id}/learning-profile": {
+      "put": {
+        "summary": "Profile",
+        "operationId": "profile_api_v2_learning_projects__project_id__learning_profile_put",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearningProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/learning-projects/{project_id}/learning": {
+      "get": {
+        "summary": "Status",
+        "operationId": "status_api_v2_learning_projects__project_id__learning_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Command",
+        "operationId": "command_api_v2_learning_projects__project_id__learning_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearningCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/learning-projects/{project_id}/learning/retry": {
+      "post": {
+        "summary": "Retry",
+        "operationId": "retry_api_v2_learning_projects__project_id__learning_retry_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "request_id"
+                  ],
+                  "properties": {
+                    "data": {},
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "标准错误响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -15657,6 +16394,130 @@
         ],
         "title": "KnowledgeOutput"
       },
+      "LearningCommand": {
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "message",
+              "answer",
+              "mode",
+              "read",
+              "notes"
+            ],
+            "title": "Operation",
+            "default": "message"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 12000,
+            "title": "Text",
+            "default": ""
+          },
+          "expected_id": {
+            "type": "string",
+            "maxLength": 150,
+            "title": "Expected Id",
+            "default": ""
+          },
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "maxProperties": 4,
+            "title": "Answers"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "outline",
+                  "study",
+                  "review"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "material_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Id"
+          },
+          "note_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Note Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "LearningCommand"
+      },
+      "LearningProfile": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "chapter",
+              "final",
+              "kaoyan"
+            ],
+            "title": "Scenario"
+          },
+          "course_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Course Name"
+          },
+          "learning_goal": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Learning Goal",
+            "default": ""
+          },
+          "exam_year": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2100.0,
+                "minimum": 2026.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Year"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "scenario",
+          "course_name"
+        ],
+        "title": "LearningProfile"
+      },
       "LessonEdit": {
         "properties": {
           "text": {
@@ -16084,6 +16945,44 @@
         ],
         "title": "PlanOutput"
       },
+      "PracticeAnswer": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "maxLength": 12000,
+            "minLength": 1,
+            "title": "Answer"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Version"
+          },
+          "rating": {
+            "type": "string",
+            "enum": [
+              "again",
+              "hard",
+              "good",
+              "easy"
+            ],
+            "title": "Rating",
+            "default": "good"
+          },
+          "self_report": {
+            "type": "boolean",
+            "title": "Self Report",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "answer",
+          "version"
+        ],
+        "title": "PracticeAnswer"
+      },
       "PreparationInput": {
         "properties": {
           "kind": {
@@ -16110,20 +17009,50 @@
             "title": "Title"
           },
           "subject_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Subject Id"
           },
           "scenario": {
             "type": "string",
-            "const": "kaoyan",
+            "enum": [
+              "chapter",
+              "final",
+              "kaoyan"
+            ],
             "title": "Scenario",
             "default": "kaoyan"
           },
           "exam_year": {
-            "type": "integer",
-            "maximum": 2100.0,
-            "minimum": 2026.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2100.0,
+                "minimum": 2026.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Exam Year"
+          },
+          "course_name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Course Name",
+            "default": ""
+          },
+          "learning_goal": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Learning Goal",
+            "default": ""
           },
           "daily_minutes": {
             "type": "integer",
@@ -16161,9 +17090,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "title",
-          "subject_id",
-          "exam_year"
+          "title"
         ],
         "title": "ProjectInput"
       },

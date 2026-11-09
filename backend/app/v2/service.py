@@ -82,6 +82,8 @@ def task(db, ctx, task_id, lock=False, active=True, assessment=False):
         db.refresh(row)
     if row.payload.get('assessment_id') and not assessment:
         fail(403, 'ASSESSMENT_ONLY', '请在本次测评中作答和查看反馈')
+    if active and p.scene_confirmed and not assessment:
+        fail(409, 'LEARNING_MOVED', '此任务保留为历史，请从项目的「与助教学习」继续')
     if active and row.kind == 'review' and settings.deeptutor_mastery_reviews:
         fail(409, 'NATIVE_REVIEW_ENABLED', '此任务已归入历史，请从 Mastery Path 复习入口开始')
     if row.material_id:
@@ -121,7 +123,7 @@ def add_material(db, p, title, text, source_version_id=None, reading=True, dedup
     p.scope_revision += 1
     p.revision += 1
     snapshot_plan(db, p, '新增学习资料，保留历史计划')
-    if reading:
+    if reading and not p.scene_confirmed:
         add_task(db, p, 'reading', f'学习：{title}', f'read:{row.id}', '先阅读资料，再通过练习检查理解', row.id, minutes=15)
     return row
 
@@ -151,6 +153,8 @@ def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qua
     if settings.deeptutor_mastery_reviews and qualified:
         from .mastery_reviews import enqueue_v2
         enqueue_v2(db, p, t, q, attempt, correct, membership_id)
+    if p.scene_confirmed:
+        return attempt.result  # Native tutoring schedules its own teaching and reviews.
     scope = {key: t.payload[key] for key in ('focus', 'source_span') if t.payload.get(key)}
     if not independent:
         add_task(db, p, 'remediation', f'补学：{q.knowledge}', f'remediate:{t.id}',
@@ -253,6 +257,8 @@ def today(db, ctx):
     end = clock().astimezone(ZoneInfo('Asia/Shanghai')).replace(hour=23, minute=59, second=59)
     selected, overflow = [], []
     for p in projects:
+        if p.scene_confirmed:
+            continue  # Native next steps and reviews are projected separately.
         spent = 0
         candidates = [t for t in rows(db, m.Task, p.id) if not t.payload.get('assessment_id') and t.state in ('todo', 'in_progress') and (not t.due_at or datetime.fromisoformat(t.due_at) <= end)]
         if settings.deeptutor_mastery_reviews:

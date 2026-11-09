@@ -1,9 +1,9 @@
 import { Radio } from 'antd';
 
 export const learningScenes = {
-  chapter: { title: '首次学习新课程', description: '我想从一章讲义开始，把内容读懂。' },
+  chapter: { title: '首次学习', description: '第一次学这门课，和助教一起建立理解。' },
   final: { title: '期末复习', description: '我已经学过，想按考试范围查漏补缺。' },
-  kaoyan: { title: '考研备考', description: '我想按考试年份复习考研政治。' },
+  kaoyan: { title: '考研学习', description: '带上目标与考试范围，和助教一起准备。' },
 };
 
 export type LearningScene = keyof typeof learningScenes;

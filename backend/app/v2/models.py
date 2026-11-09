@@ -25,6 +25,20 @@ class Project(Entity, Base):
     scope_revision: Mapped[int] = mapped_column(Integer, default=1)
     policy: Mapped[str] = mapped_column(String(60), default='kaoyan-politics-v1')
     native_records: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    course_name: Mapped[str] = mapped_column(String(200), default='', server_default='')
+    learning_goal: Mapped[str] = mapped_column(Text, default='', server_default='')
+    scene_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
+class ProjectLearning(Entity, Base):
+    __tablename__ = 'v2_project_learning'
+    __table_args__ = (UniqueConstraint('project_id', 'scope_revision', 'plan_revision'),)
+    project_id: Mapped[str] = mapped_column(ForeignKey('v2_projects.id'), index=True)
+    scope_revision: Mapped[int] = mapped_column(Integer)
+    plan_revision: Mapped[int] = mapped_column(Integer)
+    path_id: Mapped[str] = mapped_column(String(150))
+    session_id: Mapped[str] = mapped_column(String(150))
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Material(Entity, Base):

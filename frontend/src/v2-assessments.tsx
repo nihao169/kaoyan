@@ -33,7 +33,7 @@ export function AssessmentsV2(){
 }
 
 function AssessmentSetup({requestedProject,mode,onClose}:{requestedProject:string|null;mode:'mock'|'practice';onClose:()=>void}) {
-  const projects = useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<{id:string;title:string;state:string}[]>('/learning-projects')});
+  const projects = useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<{id:string;title:string;state:string;policy:string}[]>('/learning-projects')});
   const activeProjects = projects.data?.filter(p=>p.state==='active') ?? [];
   const [selected,setSelected] = useState(requestedProject ?? undefined);
   const [ids,setIds] = useState<string[]>([]);
@@ -59,7 +59,7 @@ function AssessmentSetup({requestedProject,mode,onClose}:{requestedProject:strin
         <Form.Item name="mode" label="模式"><Select style={{width:140}} options={[{value:'mock',label:'限时模考'},{value:'practice',label:'成组练习'}]}/></Form.Item>
         <Form.Item name="minutes" label="时长（分钟）" rules={[{required:true,type:'integer'}]}><InputNumber min={5} max={180}/></Form.Item>
       </Space>
-      <p>选择题目（最多 50 道，AI 生成题会标明来源）。{politicsPracticeNotice}</p>
+      <p>选择题目（最多 50 道，AI 生成题会标明来源）。{project?.policy==='kaoyan-politics-v1'&&politicsPracticeNotice}</p>
       {project&&<State query={bank}>
         <Checkbox.Group value={ids} onChange={setIds} style={{display:'grid',gap:12}} options={bank.data?.map(q=>({value:q.id,label:(q.origin==='past_paper'?'个人导入真题 · ':q.origin==='simulated_paper'?'模拟卷 · ':'AI生成 · ')+q.prompt}))}/>
         {!bank.data?.length&&<p className="muted">当前还没有可用题目。请先<Link to={'/learning/projects/'+project.id}>返回项目学习</Link>并准备练习。</p>}

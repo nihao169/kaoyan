@@ -21,6 +21,7 @@ from .v2.identity import router as v2_identity
 from .v2.assessments import router as v2_assessments
 from .v2.exam_resources import router as v2_exam_resources
 from .v2.mastery_review_routes import router as v2_mastery_reviews
+from .v2.project_learning import router as v2_project_learning
 
 logger = logging.getLogger('zhixing')
 
@@ -125,6 +126,7 @@ def create_app():
     app.include_router(v2_assessments, prefix='/api/v2')
     app.include_router(v2_exam_resources, prefix='/api/v2')
     app.include_router(v2_mastery_reviews, prefix='/api/v2')
+    app.include_router(v2_project_learning, prefix='/api/v2')
 
     def openapi():
         if app.openapi_schema:

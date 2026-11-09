@@ -93,7 +93,9 @@ def resources(project_id: str, ctx=Depends(context), db=Depends(get_db)):
     rows = db.scalars(select(m.ExamResource).join(m.Material).where(
         m.ExamResource.project_id == p.id, m.Material.state == 'ready'
     ).order_by(m.ExamResource.year.desc(), m.ExamResource.created_at.desc()))
-    return {'exam_year': p.exam_year, 'references': REFERENCE, 'resources': [view(row, True) for row in rows]}
+    politics = p.policy == 'kaoyan-politics-v1'
+    return {'exam_year': p.exam_year, 'references': REFERENCE if politics else [],
+            'sample_available': politics, 'resources': [view(row, True) for row in rows]}
 
 
 @router.post('/learning-projects/{project_id}/exam-resources', status_code=201)
@@ -177,6 +179,8 @@ def study_topic(project_id: str, resource_id: str, code: str, ctx=Depends(contex
 def add_sample(project_id: str, request: Request, ctx=Depends(context), db=Depends(get_db)):
     from .simulated_content import paper, syllabus
     p = s.project(db, ctx, project_id, lock=True)
+    if p.policy != 'kaoyan-politics-v1':
+        fail(422, 'POLITICS_ONLY', '当前模拟资料仅适用于政治课程，请导入本课程有权使用的资料')
     s.no_active_mock(db, p.id)
     existing = db.scalars(select(m.ExamResource).where(m.ExamResource.project_id == p.id,
         m.ExamResource.edition == 'simulation-v1'))

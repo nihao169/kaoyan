@@ -8,7 +8,8 @@ import { Blank, PageTitle, State, useRun } from './ui';
 type ReviewItem = {id:string;scope_id:string;title:string;knowledge:string;due_at:number;due:boolean;reason:string;next_step?:string};
 type ReviewQueue = {enabled:boolean;items:ReviewItem[];history:{id:string;title:string;due_at?:string;state:string}[];
   pending:number;unavailable:boolean};
-type Question = {question_id:string;prompt:string;options:{id:string;label:string;body:string}[];questions?:Question[]};
+export type NativeQuestion = {question_id:string;prompt:string;options:{id:string;label:string;body:string}[];questions?:NativeQuestion[]};
+type Question = NativeQuestion;
 type ReviewSession = {state:string;request_id:string;question:Question|null;feedback:string};
 const queueKey = ['mastery-reviews'];
 
@@ -44,7 +45,7 @@ export function MasteryReviewHistory() {
   </ul></section>;
 }
 
-function ReviewQuestion({question,answers,setAnswer,disabled}:{question:Question;answers:Record<string,string>;
+export function ReviewQuestion({question,answers,setAnswer,disabled}:{question:Question;answers:Record<string,string>;
   setAnswer:(id:string,value:string)=>void;disabled:boolean}) {
   return <section><p>{question.prompt}</p>{question.questions?.length?question.questions.map((child,i)=>
     <div key={child.question_id}><strong>第 {i+1} 题</strong>

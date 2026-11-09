@@ -69,7 +69,7 @@ export function ExamResources({projectId,examYear,active}:{projectId:string;exam
   const [json,setJson]=useState('');
   const [year,setYear]=useState<number>();
   const path='/learning-projects/'+projectId+'/exam-resources';
-  const query=useQuery({queryKey:['v2-exam-resources',projectId],queryFn:()=>apiV2<{resources:Resource[];references:Reference[]}>(path)});
+  const query=useQuery({queryKey:['v2-exam-resources',projectId],queryFn:()=>apiV2<{resources:Resource[];references:Reference[];sample_available:boolean}>(path)});
   async function save() {
     let payload:unknown;
     try {payload=JSON.parse(json)} catch {message.error('资料清单不是有效的 JSON');return}
@@ -88,7 +88,7 @@ export function ExamResources({projectId,examYear,active}:{projectId:string;exam
   return <><Space wrap><Select style={{width:150}} allowClear placeholder="全部年份" value={year} onChange={setYear}
     options={[...new Set(query.data?.resources.map(r=>r.year))].map(y=>({value:y,label:y+' 年'}))}/>
     <Button type="primary" disabled={!active} onClick={()=>setOpen(true)}>导入年度资料</Button>
-    <Button loading={busy} disabled={!active||!!query.data?.resources.some(r=>r.edition==='simulation-v1')}
+    <Button loading={busy} disabled={!active||!query.data?.sample_available||!!query.data?.resources.some(r=>r.edition==='simulation-v1')}
       onClick={()=>void run(()=>apiV2(path+'/sample','POST',undefined,key()),'已添加模拟考纲和模拟卷')}>添加模拟资料</Button></Space>
     <p className="muted">考纲按项目目标年份管理。真题可按原卷顺序练习或限时作答。导入内容只在本项目可见。</p>
     <State query={query}>{items?.length?items.map(r=><article className="v2-note" key={r.id}>

@@ -25,9 +25,11 @@ class Input(BaseModel):
 
 class ProjectInput(Input):
     title: str = Field(min_length=1, max_length=200)
-    subject_id: str
-    scenario: Literal['kaoyan'] = 'kaoyan'
-    exam_year: int = Field(ge=2026, le=2100)
+    subject_id: str | None = None
+    scenario: Literal['chapter', 'final', 'kaoyan'] = 'kaoyan'
+    exam_year: int | None = Field(default=None, ge=2026, le=2100)
+    course_name: str = Field(default='', max_length=200)
+    learning_goal: str = Field(default='', max_length=2000)
     daily_minutes: int = Field(default=45, ge=10, le=480)
     target_score: int | None = Field(default=None, ge=0, le=100)
     deadline: date | None = None
@@ -82,7 +84,7 @@ class PreparationInput(Input):
 
 def project_view(p):
     return entity(p, 'id', 'title', 'scenario', 'subject_id', 'exam_year', 'daily_minutes', 'target_score',
-                  'deadline', 'state', 'revision', 'scope_revision', 'policy')
+                  'deadline', 'state', 'revision', 'scope_revision', 'policy', 'course_name', 'learning_goal', 'scene_confirmed')
 
 
 def task_view(t):
@@ -104,9 +106,9 @@ def create_run(db, p, kind, prompt, task_id=None, membership_id=None, previous_b
 
 @router.get('/scenarios')
 def scenarios(ctx=Depends(context)):
-    return [{'id': 'kaoyan', 'title': '考研复习', 'available': True},
-            {'id': 'chapter', 'title': '章节学习', 'available': False},
-            {'id': 'final', 'title': '期末备考', 'available': False}]
+    return [{'id': 'chapter', 'title': '首次学习', 'available': True},
+            {'id': 'final', 'title': '期末复习', 'available': True},
+            {'id': 'kaoyan', 'title': '考研学习', 'available': True}]
 
 
 @router.get('/learning-projects')
@@ -116,11 +118,23 @@ def projects(ctx=Depends(context), db=Depends(get_db)):
 
 @router.post('/learning-projects', status_code=201)
 def new_project(data: ProjectInput, request: Request, ctx=Depends(context), db=Depends(get_db)):
-    subject = db.get(old.Subject, data.subject_id)
-    if not subject or subject.code != 'politics':
-        fail(422, 'SUBJECT_NOT_READY', '首版支持考研政治')
+    if data.scenario == 'kaoyan' and not data.exam_year:
+        fail(422, 'EXAM_YEAR_REQUIRED', '请填写考研年份')
+    subject = db.get(old.Subject, data.subject_id) if data.subject_id else None
+    if data.subject_id and not subject:
+        fail(422, 'SUBJECT_NOT_FOUND', '课程分类不存在')
+    if not subject:
+        subject = db.scalar(select(old.Subject).where(old.Subject.code == 'general'))
+        if not subject:
+            subject = old.Subject(code='general', name='通用课程')
+            db.add(subject)
+            db.flush()
     def save():
-        p = m.Project(space_id=s.space(db, ctx.user.id).id, **data.model_dump(exclude={'deadline'}), deadline=data.deadline.isoformat() if data.deadline else None)
+        fields = data.model_dump(exclude={'deadline', 'subject_id', 'exam_year'})
+        p = m.Project(space_id=s.space(db, ctx.user.id).id, **fields, subject_id=subject.id,
+                      exam_year=data.exam_year or date.today().year, scene_confirmed=bool(data.course_name),
+                      policy='kaoyan-politics-v1' if data.course_name.strip() in ('政治', '考研政治') or (not data.course_name and subject.code == 'politics') else 'general-mastery-v1',
+                      deadline=data.deadline.isoformat() if data.deadline else None)
         db.add(p)
         db.flush()
         s.snapshot_plan(db, p, '用户确认第一份学习计划，等待选择学习资料')
@@ -320,7 +334,7 @@ def session(task_id: str, ctx=Depends(context), db=Depends(get_db)):
     latest_run = db.scalar(select(m.AIRun).where(m.AIRun.task_id == t.id, m.AIRun.scope_revision == p.scope_revision)
                            .order_by(m.AIRun.created_at.desc(), m.AIRun.id.desc()).limit(1))
     return {'task': task_view(t), 'project': project_view(p), 'material': material_view,
-            'archived_review': t.kind == 'review' and settings.deeptutor_mastery_reviews,
+            'archived_review': p.scene_confirmed or (t.kind == 'review' and settings.deeptutor_mastery_reviews),
             'native_solve': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
             'native_lessons': settings.deeptutor_native_knowledge and settings.deeptutor_native_lessons,
             'checkpoint': row.checkpoint if row else {}, 'revision': row.revision if row else 0,

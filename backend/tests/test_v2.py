@@ -397,7 +397,7 @@ def test_budget_plan_history_and_future_scenarios(clients):
     plans=call(student,f'/learning-projects/{p["id"]}/plans')
     assert len(plans)==3
     call(student,f'/learning-projects/{p["id"]}/plans','POST',{'revision':1,'daily_minutes':20},409)
-    assert [x['available'] for x in call(student,'/scenarios')]==[True,False,False]
+    assert [x['available'] for x in call(student,'/scenarios')]==[True,True,True]
 
 
 def test_worker_real_failure_preserves_learning_and_no_fake_questions(clients, monkeypatch):

@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Alert, App as AntApp, Button, Checkbox, Form, Input, InputNumber, Modal, Radio, Select, Space, Tabs, Tag } from 'antd';
 import { ArrowRightOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
-import { api, apiV2, key, type Catalog } from './api';
+import { apiV2, key } from './api';
 import { Blank, PageTitle, State, useRun } from './ui';
 import { CitationList, ExamResources, MaterialSearch, type Citation } from './v2-resources';
 import { MasteryReviewQueue } from './mastery-reviews';
 import { useUser } from './App';
-import { LearningSceneOptions, learningScenes, politicsPracticeNotice, readLearningScene, saveLearningScene, type LearningScene } from './v2-scenes';
+import { LearningSceneOptions, learningScenes, politicsPracticeNotice, readLearningScene, type LearningScene } from './v2-scenes';
+import { LearningProfileForm, ProjectLearning, NativeLearningOverview, LearningSummary, type LearningProject } from './project-learning';
 import './v2.css';
 
 type Task = {id:string;project_id:string;project_title?:string;title:string;kind:string;reason:string;state:string;estimated_minutes:number;due_at?:string};
-type Today = {tasks:Task[];deferred:Task[];projects:number;estimated_minutes:number};
-type Project = {id:string;title:string;scenario:string;subject_id:string;exam_year:number;daily_minutes:number;target_score?:number;deadline?:string;state:string;revision:number};
+type Project = LearningProject & {subject_id:string;daily_minutes:number;target_score?:number;deadline?:string};
 type Material = {id:string;title:string;state:string;source_version_id?:string;text?:string};
 type Report = {knowledge:{knowledge:string;state:string;kind:string;created_at:string}[];evidence_count:number;completed_tasks:number;task_count:number;correct:number;answered:number;due_reviews:number;coverage_note:string;syllabi:{year:number;edition:string;total:number;studied:number;verified:number}[]};
 type Outline = {name:string;points:string[]}[];
@@ -33,26 +33,16 @@ function TaskList({tasks}:{tasks:Task[]}) {
   return <div className="v2-task-list">{tasks.map(t=><div className="v2-task" key={t.id}><div><Space><Tag>{names[t.kind]||t.kind}</Tag><span className="muted">{t.project_title}</span></Space><h3>{t.title}</h3><p>{t.reason}</p>{t.due_at&&<small>安排时间：{new Date(t.due_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}</small>}</div><div className="v2-task-action"><span>{t.estimated_minutes} 分钟 · {names[t.state]}</span><Link to={'/learning/session/'+t.id}><Button icon={<ArrowRightOutlined aria-hidden/>}>{t.state==='completed'?'查看记录':'进入学习'}</Button></Link></div></div>)}</div>;
 }
 
-function useToday(enabled=true) {
-  return useQuery({queryKey:['v2-today'],queryFn:()=>apiV2<Today>('/today'),enabled});
-}
-
 export function TodayV2() {
-  const query = useToday();
-  return <><PageTitle title="今天，从这里继续" description="学一点，试一试，再用证据决定下一步。" action={<StartLearning label="开始新学习"/>}/><MasteryReviewQueue dueOnly/><State query={query}>{query.data&&<>
-    <div className="v2-overview"><div><span>今日安排</span><strong>{query.data.estimated_minutes}<small> 分钟</small></strong></div><div><span>可执行任务</span><strong>{query.data.tasks.length}</strong></div><div><span>进行中的项目</span><strong>{query.data.projects}</strong></div></div>
-    {query.data.tasks.length?<><div className="v2-section-heading"><h2>你的下一步</h2><span>每项安排都有原因</span></div><TaskList tasks={query.data.tasks}/></>:<Blank description="还没有今日任务。开始新学习，或到学习项目里继续添加资料。"/>}
-    {!!query.data.deferred.length&&<Alert type="info" message={`${query.data.deferred.length} 项任务超出今日预算`} description="这些任务仍保留在项目中。可以调整学习时间，或先完成今天的重点。"/>}
-    <div className="v2-loop"><span>学习与尝试</span><ArrowRightOutlined/><span>反馈与补学</span><ArrowRightOutlined/><span>独立验证</span><ArrowRightOutlined/><span>复习与下一轮</span></div>
-  </>}</State></>;
+  return <><PageTitle title="今天，从这里继续" description="带着目标和问题，与助教一起学习。" action={<StartLearning label="开始新学习"/>}/>
+    <NativeLearningOverview/><MasteryReviewQueue dueOnly/></>;
 }
 
 export function ProjectsV2() {
-  const user = useUser();
   const query = useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<Project[]>('/learning-projects')});
   return <><PageTitle title="我的学习项目" description="每个目标，都有自己的资料、计划和学习记录。" action={<StartLearning label="新建项目"/>}/>
     <State query={query}>{query.data?.length?<div className="v2-project-grid">{query.data.map(p=>{
-      const scene = readLearningScene(user.id, p.id);
+      const scene = p.scene_confirmed?p.scenario:undefined;
       return <Link className="v2-project" to={'/learning/projects/'+p.id} key={p.id}>
         <Space><Tag color={p.state==='active'?'green':'default'}>{p.state==='active'?(scene?learningScenes[scene].title:'学习项目'):'已归档'}</Tag>
           {(!scene || scene==='kaoyan')&&<span>{p.exam_year}</span>}
@@ -71,34 +61,28 @@ function StartLearning({label}:{label:string}) {
   </>;
 }
 
-type ProjectForm = {title:string;exam_year?:number;daily_minutes:number;target_score?:number;deadline?:string};
+type ProjectForm = {title:string;course_name:string;learning_goal?:string;exam_year?:number;daily_minutes:number;target_score?:number;deadline?:string};
 
 function StartLearningDialog({onClose}:{onClose:()=>void}) {
-  const user = useUser();
-  const {message} = AntApp.useApp();
-  const catalog = useQuery({queryKey:['catalog'],queryFn:()=>api<Catalog>('/catalog')});
   const projects = useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<Project[]>('/learning-projects')});
   const [scene,setScene] = useState<LearningScene>();
   const [step,setStep] = useState<'choose'|'create'|'existing'>('choose');
   const [projectId,setProjectId] = useState<string>();
   const {run,busy} = useRun();
   const navigate = useNavigate();
-  const subject = catalog.data?.subjects.find(x=>x.code==='politics');
   const activeProjects = projects.data?.filter(p=>p.state==='active') ?? [];
   const defaultYear = new Date().getFullYear()+1;
 
-  function openProject(id:string, selected:LearningScene) {
-    const saved = saveLearningScene(user.id, id, selected);
-    if (!saved) message.warning('浏览器未能记住场景，本次仍可使用。');
+  function openProject(id:string, _selected:LearningScene) {
     onClose();
-    navigate('/learning/projects/'+id, {state:saved?null:{learningScene:selected}});
+    navigate('/learning/projects/'+id);
   }
 
   async function create(values:ProjectForm) {
-    if (!subject || !scene || busy) return;
+    if (!scene || busy) return;
     const project = await run(()=>apiV2<Project>('/learning-projects','POST',{
-      title:values.title, daily_minutes:values.daily_minutes, subject_id:subject.id, scenario:'kaoyan',
-      exam_year:scene==='kaoyan'?values.exam_year:defaultYear,
+      title:values.title, course_name:values.course_name, learning_goal:values.learning_goal||'', daily_minutes:values.daily_minutes, scenario:scene,
+      ...(scene==='kaoyan'?{exam_year:values.exam_year}:{}),
       ...(scene==='kaoyan'?{target_score:values.target_score}:{}),
       ...(scene==='final'?{deadline:values.deadline||null}:{}),
     },key()));
@@ -124,17 +108,18 @@ function StartLearningDialog({onClose}:{onClose:()=>void}) {
         <Button type="primary" disabled={!activeProjects.some(p=>p.id===projectId)} onClick={()=>projectId&&openProject(projectId,scene)}>打开项目</Button></Space>
     </>}
     {step==='create'&&<>
-      {catalog.error&&<Alert type="error" message="暂时无法读取项目配置" action={<Button onClick={()=>catalog.refetch()}>重试</Button>}/>}
       <Form layout="vertical" initialValues={{exam_year:defaultYear,daily_minutes:45}} onFinish={create}>
         <Form.Item label={scene==='chapter'?'课程或章节名称':'项目名称'} name="title" rules={[{required:true,whitespace:true}]}>
           <Input autoFocus maxLength={200} placeholder={scene==='chapter'?'例如：统计学 · 第一章':scene==='final'?'例如：统计学期末复习':'例如：考研政治第一轮复习'}/>
         </Form.Item>
+        <Form.Item label="课程名称" name="course_name" rules={[{required:true,whitespace:true}]}><Input maxLength={200} placeholder="例如：统计学、高等数学、考研政治"/></Form.Item>
+        <Form.Item label="学习目标与范围（可选）" name="learning_goal"><Input.TextArea rows={3} maxLength={2000} placeholder="也可以进入项目后与助教一起明确。"/></Form.Item>
         {scene==='kaoyan'&&<Form.Item label="考试年份" name="exam_year" rules={[{required:true,type:'integer'}]}><InputNumber min={2026} max={2100}/></Form.Item>}
         <Form.Item label="每日学习时间（分钟）" name="daily_minutes" rules={[{required:true,type:'integer'}]}><InputNumber min={10} max={480}/></Form.Item>
         {scene==='kaoyan'&&<Form.Item label="目标分数（可选）" name="target_score"><InputNumber min={0} max={100} precision={0}/></Form.Item>}
         {scene==='final'&&<Form.Item label="考试日期（可选）" name="deadline"><Input type="date"/></Form.Item>}
         <Space wrap><Button autoInsertSpace={false} disabled={busy} onClick={()=>setStep('choose')}>返回</Button>
-          <Button type="primary" htmlType="submit" loading={busy} disabled={!subject}>确认并创建学习计划</Button></Space>
+          <Button type="primary" htmlType="submit" loading={busy}>创建并与助教开始学习</Button></Space>
       </Form>
     </>}
   </Modal>;
@@ -147,120 +132,61 @@ export function ProjectV2() {
   return <State query={query}>{query.data&&<ProjectContent key={`${user.id}:${query.data.id}`} p={query.data}/>}</State>;
 }
 
-function defaultProjectTab(scene:LearningScene|undefined, p:Detail) {
-  if (!scene || p.state!=='active' || p.materials.some(m=>m.state==='ready')) return 'study';
-  return scene==='kaoyan'?'annual':'materials';
-}
-
-function ProjectNextStep({p,scene,showTab}:{p:Detail;scene:LearningScene;showTab:(tab:string)=>void}) {
-  const navigate = useNavigate();
-  const hasMaterials = p.materials.some(m=>m.state==='ready');
-  const today = useToday(hasMaterials);
-  const bank = useQuery({queryKey:['v2-bank',p.id],queryFn:()=>apiV2<{id:string}[]>('/learning-projects/'+p.id+'/question-bank'),
-    enabled:scene==='final'&&hasMaterials});
-  const next = today.data?.tasks.find(t=>t.project_id===p.id);
-  const canSelfTest = scene==='final'&&!bank.error&&!!bank.data?.length;
-  const assessmentLink = `/learning/assessments?project=${encodeURIComponent(p.id)}${scene==='final'?'&mode=practice':''}`;
-  const materialLabel = scene==='chapter'?'添加本章资料':scene==='final'?'添加考试范围内的资料':'添加复习资料';
-  const actionLabel = scene==='chapter'&&next?.kind==='reading'?'开始阅读':'继续学习任务';
-
-  return <section className="scene-next-step" aria-labelledby="project-next-step">
-    <h2 id="project-next-step">下一步</h2>
-    {!hasMaterials&&<p>{scene==='chapter'?'建议先添加一章的讲义，导入后即可开始阅读。':scene==='final'?'先添加考试范围内的讲义和复习提纲。':'先确认考试范围，或添加手头的讲义开始学习。'}</p>}
-    {hasMaterials&&next&&<p>{next.title} · {next.estimated_minutes} 分钟</p>}
-    {hasMaterials&&!next&&<p>{canSelfTest?'可以从已有题目开始自测，做完后查看反馈和补学安排。':'可以查看项目任务、学习记录或继续添加资料。'}</p>}
-    <Space wrap>
-      {!hasMaterials&&scene==='kaoyan'&&<Button type="primary" onClick={()=>showTab('annual')}>查看年度考纲与试卷</Button>}
-      {!hasMaterials&&<Button type={scene==='kaoyan'?'default':'primary'} onClick={()=>showTab('materials')}>{materialLabel}</Button>}
-      {hasMaterials&&next&&<Button type="primary" onClick={()=>navigate('/learning/session/'+next.id)}>{actionLabel}</Button>}
-      {hasMaterials&&canSelfTest&&<Button type={next?'default':'primary'} onClick={()=>navigate(assessmentLink)}>开始成组练习</Button>}
-      {hasMaterials&&scene==='chapter'&&<Button type={next?'default':'primary'} onClick={()=>showTab('notes')}>打开笔记与闪卡</Button>}
-      {hasMaterials&&scene==='kaoyan'&&<Button onClick={()=>navigate(assessmentLink)}>练习或模考</Button>}
-      {hasMaterials&&scene!=='chapter'&&<Button onClick={()=>showTab('report')}>查看学习反馈</Button>}
-      {hasMaterials&&!next&&!canSelfTest&&<Button onClick={()=>showTab('study')}>查看项目任务</Button>}
-    </Space>
-    {scene==='final'&&hasMaterials&&bank.isSuccess&&!bank.data.length&&<p className="muted">项目暂无可用题目。可以先阅读资料并使用学习任务里的理解检查。</p>}
-    {scene==='final'&&hasMaterials&&bank.error&&<p className="muted">暂时无法读取题库。可以继续复习，或 <Button type="link" size="small" onClick={()=>bank.refetch()}>重试读取题库</Button>。</p>}
-  </section>;
-}
-
 function ProjectContent({p}:{p:Detail}) {
-  const user = useUser();
-  const {state} = useLocation();
   const {run,busy}=useRun();
-  const {modal,message}=AntApp.useApp();
-  const [scene,setScene] = useState<LearningScene|undefined>(()=>readLearningScene(user.id,p.id) ?? state?.learningScene);
-  const [sceneOpen,setSceneOpen] = useState(false);
-  const [selectedScene,setSelectedScene] = useState<LearningScene>();
-  const [tab,setTab] = useState(()=>defaultProjectTab(scene,p));
+  const {modal}=AntApp.useApp();
+  const [tab,setTab]=useState('study');
+  const [profileOpen,setProfileOpen]=useState(false);
   const [materialOpen,setMaterialOpen]=useState(false);
-  const materialAction = useRef<HTMLButtonElement>(null);
-  const projectContent = useRef<HTMLElement>(null);
   const [uploading,setUploading]=useState(false);
-  const courses=useQuery({queryKey:['v2-courses'],queryFn:()=>apiV2<{id:string;title:string;version:number}[]>('/course-materials')});
   const [selectedCourse,setSelectedCourse]=useState<string>();
   const [form]=Form.useForm();
+  const projectContent=useRef<HTMLElement>(null);
+  const courses=useQuery({queryKey:['v2-courses'],queryFn:()=>apiV2<{id:string;title:string;version:number}[]>('/course-materials')});
   const active=p.state==='active';
-  const description = [
-    scene?learningScenes[scene].title:`${p.exam_year} 考研政治`,
-    scene==='kaoyan'?`${p.exam_year} 考研政治`:null,
-    scene==='final'&&p.deadline?`考试日期 ${p.deadline}`:null,
-    `每日 ${p.daily_minutes} 分钟`, `计划版本 ${p.revision}`,
-  ].filter(Boolean).join(' · ');
-
-  function changeScene() {
-    if (!selectedScene) return;
-    if (!saveLearningScene(user.id,p.id,selectedScene)) message.warning('浏览器未能记住场景，本次仍可使用。');
-    setScene(selectedScene);
-    setTab(defaultProjectTab(selectedScene,p));
-    setSceneOpen(false);
+  function showTab(next:string){setTab(next);requestAnimationFrame(()=>projectContent.current?.scrollIntoView({block:'start'}));}
+  async function upload(file:File){
+    setUploading(true);const body=new FormData();body.append('file',file);
+    try{await run(()=>apiV2('/learning-projects/'+p.id+'/uploads','POST',body),'资料已导入，索引就绪后可与助教学习');}finally{setUploading(false);}
   }
-
-  function showTab(next:string) {
-    setTab(next);
-    requestAnimationFrame(()=>{
-      projectContent.current?.scrollIntoView({block:'start'});
-      const target=next==='materials'?materialAction.current:projectContent.current;
-      target?.focus({preventScroll:true});
-    });
-  }
-
-  async function upload(file:File) {
-    setUploading(true);
-    const body=new FormData();body.append('file',file);
-    try {await run(()=>apiV2('/learning-projects/'+p.id+'/uploads','POST',body),'资料已导入，阅读任务已加入计划')} finally {setUploading(false)}
-  }
-  const materialPanel=<><Space wrap><Button ref={materialAction} type="primary" disabled={!active} onClick={()=>setMaterialOpen(true)}>粘贴学习资料</Button><label className="v2-file-button">{uploading?'正在导入…':'上传 PDF / Word / 文本'}<input type="file" disabled={uploading||!active} accept=".pdf,.docx,.txt,.md" onChange={e=>{if(e.target.files?.[0])void upload(e.target.files[0]);e.target.value=''}}/></label></Space>
-    <div className="v2-course-picker"><Select style={{minWidth:230}} placeholder="选择教师已启用的课程资料" value={selectedCourse} onChange={setSelectedCourse} options={courses.data?.map(c=>({value:c.id,label:c.title+' · v'+c.version}))}/><Button disabled={!selectedCourse||!active} onClick={()=>run(()=>apiV2('/learning-projects/'+p.id+'/course-materials','POST',{source_version_id:selectedCourse}),'已加入项目')}>加入课程资料</Button></div>
-    <p className="muted">个人资料默认私有。扫描件需先 OCR；目前每份最多 20 MB、正文30万字。</p>
+  const materialPanel=<><Space wrap><Button type="primary" disabled={!active} onClick={()=>setMaterialOpen(true)}>粘贴学习资料</Button>
+    <label className="v2-file-button">{uploading?'正在导入…':'上传 PDF / Word / 文本'}<input type="file" disabled={!active||uploading} accept=".pdf,.docx,.txt,.md"
+      onChange={e=>{if(e.target.files?.[0])void upload(e.target.files[0]);e.target.value='';}}/></label></Space>
+    <div className="v2-course-picker"><Select aria-label="教师课程资料" style={{minWidth:230}} placeholder="选择教师已启用的课程资料" value={selectedCourse}
+      onChange={setSelectedCourse} options={courses.data?.map(c=>({value:c.id,label:c.title+' · v'+c.version}))}/>
+      <Button disabled={!active||!selectedCourse} onClick={()=>run(()=>apiV2('/learning-projects/'+p.id+'/course-materials','POST',{source_version_id:selectedCourse}),'已加入项目')}>加入课程资料</Button></div>
+    <p className="muted">资料默认私有，支持文字型 PDF、Word、TXT 和 Markdown。扫描件请先 OCR。</p>
     {active&&<TutorIndexPanel projectId={p.id}/>}
-    {p.materials.filter(m=>m.state==='ready').map(m=><div className="v2-material" key={m.id}><ReadOutlined/><div><strong>{m.title}</strong><p>{m.source_version_id?'关联课程资料，使用时检查当前权限':'个人资料 · 仅自己可用'}</p></div><Button danger type="text" disabled={!active} onClick={()=>modal.confirm({title:'移除这份学习资料？',content:'关联任务将停止，历史记录保留，旧助教运行不再继续使用。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/materials/'+m.id,'DELETE'),'资料已移除')})}>移除</Button></div>)}
-    {p.materials.some(m=>m.state==='ready')?<MaterialSearch projectId={p.id}/>:<Blank description="添加资料后，系统会安排第一项学习任务。"/>}</>;
-  return <><PageTitle title={p.title} description={description} action={<Space wrap>
-    {active&&<Button onClick={()=>{setSelectedScene(scene);setSceneOpen(true)}}>{scene?'切换场景':'选择场景'}</Button>}
-    <Link to="/learning/projects">返回项目列表</Link>
-  </Space>}/>
+    {p.materials.filter(m=>m.state==='ready').map(m=><div className="v2-material" key={m.id}><ReadOutlined/><div><strong>{m.title}</strong>
+      <p>{m.source_version_id?'关联课程资料':'个人学习资料'}</p></div><Button danger type="text" disabled={!active} onClick={()=>modal.confirm({title:'移除这份学习资料？',
+        content:'原学习记录保留，助教需要依据新的资料范围重新确认路径。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/materials/'+m.id,'DELETE'),'资料已移除')})}>移除</Button></div>)}
+    {p.materials.some(m=>m.state==='ready')?<MaterialSearch projectId={p.id}/>:<Blank description="添加资料后，请回到与助教学习，一起确定大纲。"/>}</>;
+  return <><PageTitle title={p.title} description={`${p.scene_confirmed?learningScenes[p.scenario].title:'待确认学习背景'} · ${p.course_name||'课程待确认'} · 每日 ${p.daily_minutes} 分钟`}
+    action={<Space wrap>{active&&<Button onClick={()=>setProfileOpen(true)}>调整学习背景</Button>}<Link to="/learning/projects">返回项目列表</Link></Space>}/>
     {!active&&<Alert type="info" message="项目已归档，保留历史记录"/>}
-    {active&&scene&&<ProjectNextStep p={p} scene={scene} showTab={showTab}/>}
-    {scene&&scene!=='kaoyan'&&<p className="muted">{politicsPracticeNotice}</p>}
-    <MasteryOutline outline={p.mastery_outline}/>
     <section ref={projectContent} className="v2-project-content" aria-label="项目学习内容" tabIndex={-1}>
-    <Tabs activeKey={tab} onChange={setTab} items={[
-      {key:'study',label:'学习与任务',children:<>{p.tasks.length?<TaskList tasks={p.tasks}/>:<Blank description="先在“课程与资料”中选择材料。"/>}{active&&!!p.tasks.filter(t=>t.state==='deferred').length&&<Button onClick={()=>run(()=>Promise.all(p.tasks.filter(t=>t.state==='deferred').map(t=>apiV2('/tasks/'+t.id,'PATCH',{state:'todo'}))),'已恢复暂缓任务')}>恢复暂缓任务</Button>}</>},
-      {key:'materials',label:'课程与资料',children:materialPanel},
-      {key:'annual',label:'年度考纲与试卷',children:<ExamResources projectId={p.id} examYear={p.exam_year} active={active}/>},
-      {key:'notes',label:'笔记与闪卡',children:<NotesPanel projectId={p.id} disabled={!active}/>},
-      {key:'chat-history',label:'答疑记录',children:<ChatHistory key={p.id} projectId={p.id}/>},
-      {key:'report',label:'证据与报告',children:<ReportPanel report={p.report}/>},
-      {key:'plan',label:'计划设置',children:<><Form layout="vertical" key={p.revision} initialValues={{daily_minutes:p.daily_minutes,target_score:p.target_score,deadline:p.deadline}} onFinish={values=>run(()=>apiV2('/learning-projects/'+p.id+'/plans','POST',{...values,deadline:values.deadline||null,revision:p.revision},key()),'计划已更新，历史版本已保留')}><Form.Item name="daily_minutes" label="每日时间预算（分钟）"><InputNumber min={10} max={480} disabled={!active}/></Form.Item><Form.Item name="target_score" label="目标分数"><InputNumber min={0} max={100} disabled={!active}/></Form.Item><Form.Item name="deadline" label={scene==='final'?'考试日期（可选）':'目标日期（可选）'}><Input type="date" disabled={!active}/></Form.Item><Button htmlType="submit" type="primary" loading={busy} disabled={!active}>确认调整计划</Button></Form><Button danger style={{marginTop:32}} disabled={!active} onClick={()=>modal.confirm({title:'归档学习项目？',content:'项目将退出今日计划，历史记录仍保留。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/archive','POST'),'已归档')})}>归档项目</Button></>},
-    ]}/>
+      <Tabs activeKey={tab} onChange={setTab} items={[
+        {key:'study',label:'与助教学习',children:<ProjectLearning project={p} materials={p.materials} showMaterials={()=>showTab('materials')}/>},
+        {key:'materials',label:'课程与资料',children:materialPanel},
+        ...(p.scenario==='kaoyan'?[{key:'annual',label:'年度考纲与试卷',children:<ExamResources projectId={p.id} examYear={p.exam_year} active={active}/>}]:[]),
+        {key:'notes',label:'笔记与闪卡',children:<NotesPanel projectId={p.id} disabled={!active}/>},
+        {key:'history',label:'历史学习记录',children:<><p className="muted">此前的任务与证据保留查阅。当前教学和掌握进度见“与助教学习”。</p><TaskList tasks={p.tasks}/><ChatHistory projectId={p.id}/><ReportPanel report={p.report}/></>},
+        {key:'plan',label:'计划设置',children:<><Form layout="vertical" key={p.revision} initialValues={{daily_minutes:p.daily_minutes,target_score:p.target_score,deadline:p.deadline}}
+          onFinish={values=>run(()=>apiV2('/learning-projects/'+p.id+'/plans','POST',{...values,deadline:values.deadline||null,revision:p.revision},key()),'时间与目标已更新')}>
+          <Form.Item name="daily_minutes" label="每日时间预算（分钟）"><InputNumber min={10} max={480} disabled={!active}/></Form.Item>
+          <Form.Item name="target_score" label="目标分数（可选）"><InputNumber min={0} max={100} disabled={!active}/></Form.Item>
+          <Form.Item name="deadline" label="目标日期（可选）"><Input type="date" disabled={!active}/></Form.Item>
+          <Button htmlType="submit" type="primary" loading={busy} disabled={!active}>确认调整计划</Button></Form>
+          <Button danger disabled={!active} onClick={()=>modal.confirm({title:'归档学习项目？',content:'历史记录保留。',onOk:()=>run(()=>apiV2('/learning-projects/'+p.id+'/archive','POST'),'已归档')})}>归档项目</Button></>},
+      ]}/>
     </section>
-    <Modal title="选择学习场景" open={sceneOpen} okText="应用场景" cancelText="取消"
-      okButtonProps={{disabled:!selectedScene}} onOk={changeScene} onCancel={()=>setSceneOpen(false)}>
-      <LearningSceneOptions value={selectedScene} onChange={setSelectedScene}/>
-      <p className="muted">场景决定页面引导。资料、作答和进度仍在当前项目。</p>
-    </Modal>
-    <Modal title="添加个人学习资料" open={materialOpen} onCancel={()=>setMaterialOpen(false)} footer={null}><Form form={form} layout="vertical" onFinish={async values=>{const result=await run(()=>apiV2('/learning-projects/'+p.id+'/materials','POST',values,key()),'资料已添加');if(result){setMaterialOpen(false);form.resetFields()}}}><Form.Item name="title" label="资料标题" rules={[{required:true,whitespace:true}]}><Input maxLength={200}/></Form.Item><Form.Item name="text" label="资料正文" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={12} maxLength={300000}/></Form.Item><Button type="primary" htmlType="submit" loading={busy}>保存并加入学习计划</Button></Form></Modal>
+    <Modal title="调整学习背景" open={profileOpen} footer={null} onCancel={()=>setProfileOpen(false)} destroyOnHidden>
+      <LearningProfileForm project={p} onDone={()=>setProfileOpen(false)}/></Modal>
+    <Modal title="添加个人学习资料" open={materialOpen} footer={null} onCancel={()=>setMaterialOpen(false)}><Form form={form} layout="vertical" onFinish={async values=>{
+      const result=await run(()=>apiV2('/learning-projects/'+p.id+'/materials','POST',values,key()),'资料已添加');if(result){form.resetFields();setMaterialOpen(false);}}}>
+      <Form.Item name="title" label="资料标题" rules={[{required:true,whitespace:true}]}><Input maxLength={200}/></Form.Item>
+      <Form.Item name="text" label="资料正文" rules={[{required:true,whitespace:true}]}><Input.TextArea rows={12} maxLength={300000}/></Form.Item>
+      <Button type="primary" htmlType="submit" loading={busy}>保存学习资料</Button></Form></Modal>
   </>;
 }
 
@@ -409,5 +335,8 @@ export function ReportsV2() {
   const [id,setId]=useState<string>();
   const selected=id||q.data?.[0]?.id;
   const report=useQuery({queryKey:['v2-report',selected],queryFn:()=>apiV2<Report>('/learning-projects/'+selected+'/report'),enabled:!!selected});
-  return <><PageTitle title="学习报告" description="查看已经发生的学习和证据，让下一步更清楚。"/><Select style={{minWidth:240,marginBottom:24}} placeholder="选择学习项目" value={selected} onChange={setId} options={q.data?.map(p=>({value:p.id,label:p.title}))}/>{selected?<State query={report}>{report.data&&<ReportPanel report={report.data}/>}</State>:<Blank description="创建项目并开始学习后，将逐步形成报告。"/>}</>;
+  const project=q.data?.find(p=>p.id===selected);
+  return <><PageTitle title="学习报告" description="查看助教学习进度与已经发生的作答证据。"/><Select style={{minWidth:240,marginBottom:24}} placeholder="选择学习项目" value={selected} onChange={setId} options={q.data?.map(p=>({value:p.id,label:p.title}))}/>
+    {project&&<LearningSummary project={project}/>}
+    {selected?<State query={report}><h2>历史作答证据</h2>{report.data&&<ReportPanel report={report.data}/>}</State>:<Blank description="创建项目并开始学习后，将逐步形成报告。"/>}</>;
 }
