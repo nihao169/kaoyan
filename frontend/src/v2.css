@@ -3,3 +3,62 @@
 .v2-excerpt,.v2-citations blockquote{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}
 .v2-excerpt mark{background:#ffe79a}
 .v2-citations .v2-material>div{min-width:0}
+
+.learning-scene-options {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.learning-scene-options .ant-radio-wrapper {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #dce3dd;
+  border-radius: 8px;
+}
+
+.learning-scene-options .ant-radio-wrapper-checked {
+  border-color: #28594b;
+  background: #eef4ef;
+}
+
+.learning-scene-options .ant-radio-wrapper:has(:focus-visible) {
+  outline: 2px solid #28594b;
+  outline-offset: 2px;
+}
+
+.learning-scene-options strong,
+.learning-scene-options strong + span {
+  display: block;
+}
+
+.learning-scene-options strong + span {
+  color: #59645e;
+}
+
+.scene-project-select {
+  display: block;
+  width: 100%;
+  margin: 6px 0 16px;
+}
+
+.scene-next-step {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #dce3dd;
+  border-radius: 10px;
+  background: #f5f8f5;
+}
+
+.scene-next-step h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.v2-project-content {
+  scroll-margin-top: 24px;
+}
+
+.scene-next-step p:last-child {
+  margin-bottom: 0;
+}
