@@ -88,7 +88,7 @@ def current_run(db, run_id, states=('running',)):
 
 
 def tick():
-    from . import project_learning
+    from . import annual_drafts, personal_learning, project_learning
     if project_learning.tick():
         return True
     from . import mastery_reviews
@@ -96,10 +96,12 @@ def tick():
         return True
     if tutor_index.tick() or tutor_teaching_index.tick():
         return True
+    if annual_drafts.tick():
+        return True
     # AIRun is the durable queue for V2 interactive tasks. A lost execution is not
     # blindly restarted: it may have been billed downstream without an acknowledgement.
     with SessionLocal.begin() as db:
-        for lost in db.scalars(select(m.AIRun).where(m.AIRun.backend != 'project_learning', m.AIRun.state.in_(['running', 'cancel_requested']),
+        for lost in db.scalars(select(m.AIRun).where(m.AIRun.backend.not_in(['project_learning', personal_learning.BACKEND, annual_drafts.BACKEND]), m.AIRun.state.in_(['running', 'cancel_requested']),
                 m.AIRun.lease_until < s.clock().isoformat()).with_for_update(skip_locked=True)):
             if (lost.state == 'running' and lost.external_id and lost.kind in ('chat', 'read', 'solve', 'evaluate')
                     and lost.metrics.get('recovery_attempts', 0) < 1):
@@ -109,7 +111,7 @@ def tick():
                 continue
             lost.state, lost.error = 'failed', 'EXECUTION_UNCERTAIN：执行中断，请核对用量后显式重试'
             event(db, lost.id, 'failed', {'message': lost.error})
-        row = db.scalar(select(m.AIRun).where(m.AIRun.backend != 'project_learning', m.AIRun.state == 'queued').order_by(m.AIRun.created_at).with_for_update(skip_locked=True))
+        row = db.scalar(select(m.AIRun).where(m.AIRun.backend.not_in(['project_learning', personal_learning.BACKEND, annual_drafts.BACKEND]), m.AIRun.state == 'queued').order_by(m.AIRun.created_at).with_for_update(skip_locked=True))
         if not row:
             return False
         row.state = 'running'
@@ -137,6 +139,9 @@ def tick():
             capability = {'native_solve': 'deep_solve', 'native_read': 'immersive_reading', 'native_guide': 'mastery_path'}.get(run.backend, 'chat')
             if native:
                 source_span = None
+                if kind == 'evaluate':
+                    task, _ = s.task(db, ctx, run.task_id, assessment=True)
+                    materials = [item for item in materials if item.id == task.material_id]
                 if native_questions:
                     task, _ = s.task(db, ctx, run.task_id)
                     if task.material_id:

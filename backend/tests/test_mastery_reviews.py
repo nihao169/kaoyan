@@ -54,12 +54,25 @@ def test_native_reviews_take_over_and_filter_revoked_scopes(clients, monkeypatch
     monkeypatch.setattr(reviews, 'topic', topic)
     queue = call(student, '/mastery-reviews')
     assert queue['pending'] == 0 and queue['items'][0]['due_at'] == when
+    scoped = '/mastery-reviews?project_id=' + project['id']
+    assert call(student, scoped)['items'] == queue['items']
+    call(teacher, scoped, status=403)
+    from test_project_learning import create
+    other = create(student)
+    assert not call(student, '/mastery-reviews?project_id=' + other['id'])['items']
     session = '/mastery-reviews/' + scope_id + '/session'
     call(teacher, session, status=403)
     monkeypatch.setattr(reviews, 'session_request', lambda *args, **kwargs: {'state': 'question', 'question': {'prompt': '试题'}})
-    assert call(student, session, 'POST', {'operation': 'start', 'submission_id': 'start-key'})['state'] == 'question'
+    assert call(student, session, 'POST', {'operation': 'start', 'submission_id': 'start-key'})['project_id'] == project['id']
+    from app.v2 import personal_learning
+    monkeypatch.setattr(personal_learning, 'native_history', lambda owner, paths: [{
+        'id':'check:independent', 'time':when, 'category':'guided', 'mastery_path_id':native_id,
+        'session_id':'zx_review_' + native_id.removeprefix('topic_zx_'), 'user_answer':'A',
+        'question':'实践是什么？', 'correct_answer':'A', 'is_correct':True}])
+    assert call(student, project_url+'/attempt-history?source=review')['items'][0]['id'] == 'check:independent'
     call(student, project_url + '/materials/' + material['id'], 'DELETE')
     assert call(student, '/mastery-reviews')['items'] == []
+    assert not call(student, project_url+'/attempt-history?source=review')['items']
     call(student, session, status=403)
 
 

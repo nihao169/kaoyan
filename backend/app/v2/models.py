@@ -28,6 +28,7 @@ class Project(Entity, Base):
     course_name: Mapped[str] = mapped_column(String(200), default='', server_default='')
     learning_goal: Mapped[str] = mapped_column(Text, default='', server_default='')
     scene_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    study_scope: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}')
 
 
 class ProjectLearning(Entity, Base):
@@ -39,6 +40,16 @@ class ProjectLearning(Entity, Base):
     path_id: Mapped[str] = mapped_column(String(150))
     session_id: Mapped[str] = mapped_column(String(150))
     context: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class LearningBatch(Entity, Base):
+    __tablename__ = 'v2_learning_batches'
+    __table_args__ = (UniqueConstraint('project_id', 'scope_revision', 'key'),)
+    project_id: Mapped[str] = mapped_column(ForeignKey('v2_projects.id'), index=True)
+    scope_revision: Mapped[int] = mapped_column(Integer)
+    key: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(30))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Material(Entity, Base):
@@ -212,7 +223,7 @@ class Assessment(Entity, Base):
     state: Mapped[str] = mapped_column(String(20), default='active')
     task_ids: Mapped[list] = mapped_column(JSON, default=list)
     drafts: Mapped[dict] = mapped_column(JSON, default=dict)
-    deadline_at: Mapped[str] = mapped_column(String(40))
+    deadline_at: Mapped[str | None] = mapped_column(String(40))
     revision: Mapped[int] = mapped_column(Integer, default=1)
 
 

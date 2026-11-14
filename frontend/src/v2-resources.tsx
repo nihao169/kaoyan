@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Alert, App, Button, Collapse, Input, Modal, Select, Space, Tag } from 'antd';
 import { apiV2, key } from './api';
 import { Blank, State, useRun } from './ui';
+import { AnnualDrafts, type AnnualKind } from './annual-drafts';
 
 export type Citation = {
   material_id: string; title: string; sha256: string; start: number; end: number;
@@ -61,7 +62,8 @@ const paperExample = {
     options:{A:'选项 A',B:'选项 B'},answer:['A'],explanation:'录入已核对的答案解析原文。',points:1}],
 };
 
-export function ExamResources({projectId,examYear,active}:{projectId:string;examYear:number;active:boolean}) {
+export function ExamResources({projectId,examYear,active,draftKind,closeDraft,returnToStudy,chooseMaterials,uploadingMaterials}:{projectId:string;examYear:number;active:boolean;
+  draftKind?:AnnualKind;closeDraft:()=>void;returnToStudy:()=>void;chooseMaterials:()=>void;uploadingMaterials:boolean}) {
   const {run,busy}=useRun();
   const {message,modal}=App.useApp();
   const navigate=useNavigate();
@@ -85,9 +87,12 @@ export function ExamResources({projectId,examYear,active}:{projectId:string;exam
     if(result)navigate('/learning/assessments/'+result.id);
   }
   const items=query.data?.resources.filter(r=>year==null||r.year===year);
-  return <><Space wrap><Select style={{width:150}} allowClear placeholder="全部年份" value={year} onChange={setYear}
+  return <><AnnualDrafts projectId={projectId} examYear={examYear} active={active} requested={draftKind} closeRequested={closeDraft}
+    onImported={returnToStudy}/>
+    <Space wrap><Select style={{width:150}} allowClear placeholder="全部年份" value={year} onChange={setYear}
     options={[...new Set(query.data?.resources.map(r=>r.year))].map(y=>({value:y,label:y+' 年'}))}/>
-    <Button type="primary" disabled={!active} onClick={()=>setOpen(true)}>导入年度资料</Button>
+    <Button disabled={!active} onClick={()=>setOpen(true)}>导入年度资料 JSON</Button>
+    <Button disabled={!active} loading={uploadingMaterials} onClick={chooseMaterials}>导入教材或讲义</Button>
     <Button loading={busy} disabled={!active||!query.data?.sample_available||!!query.data?.resources.some(r=>r.edition==='simulation-v1')}
       onClick={()=>void run(()=>apiV2(path+'/sample','POST',undefined,key()),'已添加模拟考纲和模拟卷')}>添加模拟资料</Button></Space>
     <p className="muted">考纲按项目目标年份管理。真题可按原卷顺序练习或限时作答。导入内容只在本项目可见。</p>
@@ -97,7 +102,7 @@ export function ExamResources({projectId,examYear,active}:{projectId:string;exam
       <h3>{r.title}</h3><p>来源：{r.source.url?<a href={r.source.url} target="_blank" rel="noreferrer">{r.source.title}</a>:r.source.title} · 导入者提供</p>
       {r.kind==='syllabus'?<Collapse items={[...new Set(r.topics?.map(t=>t.chapter))].map(ch=>({key:ch,label:ch,
         children:r.topics?.filter(t=>t.chapter===ch).map(t=><div className="v2-material" key={t.code}><span>{t.title}</span>
-          <Button disabled={!active} loading={busy} onClick={()=>void study(r.id,t.code)}>学习这个知识点</Button></div>)}))}/>:
+          <Button disabled={!active} loading={busy} onClick={()=>void study(r.id,t.code)}>查看考纲原文</Button></div>)}))}/>:
         <><p>{r.question_count} 道题 · {r.minutes} 分钟 · 卷面 {r.total_points} 分</p><Space wrap>
           <Button disabled={!active} loading={busy} onClick={()=>void start(r,'practice')}>按原卷练习</Button>
           <Button disabled={!active} type="primary" onClick={()=>modal.confirm({title:'开始限时真题模考？',

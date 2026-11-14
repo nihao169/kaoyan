@@ -12,8 +12,13 @@ if ($StaticFrontend -and ($ApiPort -ne $FrontendPort -or -not (Test-Path -Litera
 }
 if (Test-Path -LiteralPath $manifestPath) {
     $previous = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $previousStart = [DateTimeOffset]::Parse([string]$previous.started_at).LocalDateTime
     foreach ($entry in $previous.services) {
-        if (Get-Process -Id $entry.pid -ErrorAction SilentlyContinue) { throw 'A recorded service is running. Use scripts/status.ps1 or scripts/stop.ps1 first.' }
+        $processInfo = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$entry.pid)
+        if (-not $processInfo) { continue }
+        if ($processInfo.CommandLine -and $processInfo.CommandLine.IndexOf($projectRoot, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        if ($processInfo.CreationDate -and $processInfo.CreationDate -lt $previousStart.AddSeconds(-5)) { continue }
+        throw "A recorded service may still be running. Open http://127.0.0.1:$($previous.frontend_port) or run scripts/status.ps1 -RuntimeName $RuntimeName."
     }
 }
 foreach ($port in @($FrontendPort,$ApiPort) | Select-Object -Unique) {

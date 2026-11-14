@@ -1,8 +1,9 @@
+import { ProjectAttempts } from './personal-learning';
 import { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Card, Collapse, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
-import { api, key, kindName, type Attempt, type Task, type Evidence, type QuestionInput } from './api';
+import { Alert, Button, Card, Collapse, Form, Input, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
+import { api, apiV2, key, kindName, type Attempt, type Task, type Evidence, type QuestionInput } from './api';
 import { Blank, PageTitle, Sources, State, date, useRun } from './ui';
 import { AgentResult, pendingAgent, type AgentRun } from './agents';
 import { StudyTask } from './student';
@@ -16,7 +17,7 @@ export function StudentAssignments(){
   const query=useQuery({queryKey:['assignments'],queryFn:()=>api<Assignment[]>('/assignments')});
   return <><PageTitle title="我的作业" description="完成教师布置的题组，再针对错题分析和练习。无需先做基础诊断。" action={<Link to="/mistakes"><Button>查看错题诊断</Button></Link>}/>
     <State query={query}>{!query.data?.length?<Blank description="还没有教师作业。请教师先上传资料、启用生成题目，再向班级发布作业。"/>:<div className="assignment-list">{query.data.map(a=><section className="panel assignment-card" key={a.id}><div className="section-heading"><div><Tag color={a.state==='submitted'?'green':'default'}>{a.state==='submitted'?'已提交':a.state==='draft'?'作答中':'未开始'}</Tag><h2>{a.title}</h2><p>{a.questions} 道题 · {a.due_at?'截止 '+date(a.due_at):'未设置截止时间'}</p></div><Link to={'/assignments/'+a.id}><Button type={a.state==='submitted'?'default':'primary'}>{a.state==='submitted'?'查看作答':a.state==='draft'?'继续作答':'开始作业'}</Button></Link></div></section>)}</div>}</State>
-    <section className="panel section-space"><h2>学习记录与巩固</h2><Space wrap><Link to="/mistakes"><Button>错题诊断</Button></Link><Link to="/reviews"><Button>复习计划</Button></Link><Link to="/history"><Button>历史学习记录</Button></Link><Link to="/goals"><Button>学习目标（可选）</Button></Link></Space></section>
+    <section className="panel section-space"><h2>学习记录与巩固</h2><Space wrap><Link to="/mistakes"><Button>错题诊断</Button></Link><Link to="/history"><Button>历史学习记录</Button></Link><Link to="/goals"><Button>学习目标（可选）</Button></Link></Space></section>
   </>;
 }
 
@@ -50,12 +51,32 @@ function GroupWork({groupId,practice}:{groupId:string;practice:boolean}){
 type Mistake={id:string;attempt_id:string;task_id:string;prompt:string;kind:string;options:Record<string,string>;selected:string[];correct_answer:string[];wrong_options:string[];missing_options:string[];response_text:string;process:string;hint_level:number;explanation:string;group_url:string|null;resolved:boolean;sources:Evidence[];cards:{id:string;title:string;body:string;source_version_id:string}[];diagnosis:AgentRun|null;practices:AgentRun[];practice_results:{id:string;state:string;total:number;independent_correct:number}[]};
 
 export function MistakeDiagnoses(){
+  const [search,setSearch]=useSearchParams();
+  const tab=search.has('attempt')||search.get('source')==='teacher'?'teacher':'personal';
+  return <><PageTitle title="错题诊断" description="自主学习错题只在学生端保存。教师作业错题在另一个标签页查看。"/>
+    <Tabs activeKey={tab} onChange={value=>setSearch(value==='teacher'?{source:'teacher'}:{})} items={[
+      {key:'personal',label:'自主学习',children:<PersonalMistakes/>},
+      {key:'teacher',label:'教师作业',children:<TeacherMistakes/>},
+    ]}/>
+  </>;
+}
+
+function PersonalMistakes(){
+  const projects=useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<{id:string;title:string;state:string}[]>('/learning-projects')});
+  const [selected,setSelected]=useState<string>();
+  const project=projects.data?.find(p=>p.id===selected)??projects.data?.[0];
+  return <State query={projects}>{project?<><Select aria-label="错题项目" value={project.id} onChange={setSelected}
+    style={{minWidth:220,marginBottom:12}} options={projects.data?.map(p=>({value:p.id,label:p.title}))}/>
+    <ProjectAttempts key={project.id} projectId={project.id} mistakes readOnly={project.state!=='active'}/></>:<Blank description="暂无学习项目。"/>}</State>;
+}
+
+function TeacherMistakes(){
   const [search]=useSearchParams();
   const attempt=search.get('attempt');
   const query=useQuery({queryKey:['mistake-diagnoses'],queryFn:()=>api<Mistake[]>('/mistake-diagnoses'),refetchInterval:q=>q.state.data?.some(m=>(m.diagnosis&&pendingAgent(m.diagnosis))||m.practices.some(pendingAgent))?2000:false});
   const {run,busy}=useRun();
   const items=query.data?.filter(m=>!attempt||m.attempt_id===attempt);
-  return <><PageTitle title="错题诊断" description="回看自己选了什么，再由 Agent 分析错选、漏选和知识缺口。诊断与针对性出题均由你手动发起。" action={attempt?<Link to="/mistakes"><Button>查看全部错题</Button></Link>:undefined}/><State query={query}>
+  return <>{attempt&&<Link to="/mistakes?source=teacher"><Button>查看全部教师作业错题</Button></Link>}<State query={query}>
     {!items?.length?<Blank description="暂无可诊断错题。完成教师作业后，客观错题或教师确认后的分析题错题会出现在这里。"/>:<div className="remediation-list">{items.map(m=><section className="panel mistake-card" key={m.id}>
       <Space wrap><Tag>{kindName(m.kind)}</Tag><Tag color={m.resolved?'green':'gold'}>{m.resolved?'已有独立巩固证据':'需要巩固'}</Tag><Link to={'/study/'+m.task_id}>直接查看原始作答</Link>{m.group_url&&<Link to={m.group_url}>查看对应作业</Link>}</Space><h2>{m.prompt}</h2>
       {!!Object.keys(m.options).length&&<div className="mistake-options">{Object.entries(m.options).map(([label,text])=><div key={label} className={m.wrong_options.includes(label)?'option-wrong':m.missing_options.includes(label)?'option-missing':m.correct_answer.includes(label)?'option-correct':''}><strong>{label}. </strong>{text}<Space wrap>{m.selected.includes(label)&&<Tag color={m.wrong_options.includes(label)?'red':'blue'}>你的选择</Tag>}{m.correct_answer.includes(label)&&<Tag color="green">正确选项</Tag>}{m.missing_options.includes(label)&&<Tag color="orange">漏选</Tag>}</Space></div>)}</div>}

@@ -100,6 +100,10 @@ def resources(project_id: str, ctx=Depends(context), db=Depends(get_db)):
 
 @router.post('/learning-projects/{project_id}/exam-resources', status_code=201)
 def import_resource(project_id: str, data: ResourceInput, request: Request, ctx=Depends(context), db=Depends(get_db)):
+    return save_resource(project_id, data, request, ctx, db)
+
+
+def save_resource(project_id, data, request, ctx, db, *, draft=None):
     p = s.project(db, ctx, project_id, lock=True)
     s.no_active_mock(db, p.id)
     if data.kind == 'syllabus':
@@ -119,7 +123,7 @@ def import_resource(project_id: str, data: ResourceInput, request: Request, ctx=
                 m.ExamResource.year == data.year, m.ExamResource.kind == data.kind, m.ExamResource.edition == data.edition)):
             fail(409, 'EDITION_EXISTS', '该年度版本已存在，请使用新的版本号')
         material = s.add_material(db, p, f'{data.year} · {data.title} · {data.edition}'[:200], text,
-                                  reading=data.kind == 'syllabus')
+                                  reading=data.kind == 'syllabus', affects_learning=data.kind == 'syllabus')
         if settings.deeptutor_native_knowledge:
             tutor_index.enqueue(db, ctx, p, [material])
         contents = {}
@@ -150,6 +154,9 @@ def import_resource(project_id: str, data: ResourceInput, request: Request, ctx=
                     'visibility': 'private', 'verification': 'user_supplied', 'importer_id': ctx.user.id})
         db.add(row)
         db.flush()
+        if draft:
+            row.source = {**row.source, 'draft_id': draft.id}
+            draft.metrics = {**draft.metrics, 'resource_id': row.id}
         db.add(AuditEvent(org_id=ctx.org_id, actor_id=ctx.user.id, action='exam_resource.imported',
                           resource_id=row.id, detail={'kind':row.kind, 'year':row.year, 'edition':row.edition}))
         if data.kind == 'syllabus':

@@ -3,11 +3,11 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import Field
 from sqlalchemy import select
-from ..auth import context
+from ..auth import context, need
 from ..api_common import EnvelopeRoute, entity, idempotent
 from ..db import get_db
 from ..errors import fail
-from . import models as m, service as s, tutor_practice
+from . import learning_guide as guide, models as m, service as s, tutor_practice
 from .routes import Input, AnswerInput, create_run
 from .exam_resources import load_resource
 
@@ -41,7 +41,11 @@ def get_assessment(db, ctx, assessment_id, lock=False):
     a = db.get(m.Assessment, assessment_id)
     if not a:
         fail(404,'NOT_FOUND','测评不存在')
-    s.project(db,ctx,a.project_id,lock=lock)
+    s.project(db,ctx,a.project_id,lock=lock,active=lock or a.state == 'active')
+    if a.deadline_at is None:
+        need(ctx, 'student')
+    if a.mode != 'mock' or a.state != 'active':
+        s.no_active_mock(db, a.project_id)
     return db.get(m.Assessment, assessment_id, populate_existing=True) if lock else a
 
 
@@ -88,7 +92,7 @@ def create(data:AssessmentInput,request:Request,ctx=Depends(context),db=Depends(
 
 
 def save_assessment(db, p, title, mode, minutes, questions, paper=None, membership_id=None):
-    a=m.Assessment(project_id=p.id,title=title,mode=mode,deadline_at=(s.clock()+timedelta(minutes=minutes)).isoformat())
+    a=m.Assessment(project_id=p.id,title=title,mode=mode,deadline_at=(s.clock()+timedelta(minutes=minutes)).isoformat() if minutes is not None else None)
     db.add(a)
     db.flush()
     tasks=[]
@@ -109,6 +113,19 @@ def from_past_paper(data:PastPaperInput,request:Request,ctx=Depends(context),db=
     paper=load_resource(db,ctx,p,data.resource_id,('past_paper','simulated_paper'))
     def save():
         s.no_active_mock(db,p.id)
+        if p.scene_confirmed and p.scenario == 'kaoyan' and paper.kind == 'past_paper':
+            prep, _ = guide.preparation(db, p, s.authorized_materials(db, ctx, p))
+            paper_ids = {item['id'] for item in prep['papers']}
+            if not prep['ready'] or paper.id not in paper_ids:
+                fail(409, 'PAPER_NOT_READY', '请先准备目标年份考纲、教材及带答案的往年真题')
+            if data.mode == 'mock':
+                practice = guide.paper_attempts(db, p, paper_ids).get('practice')
+                reviewed = practice and db.scalar(select(m.AIRun.id).where(m.AIRun.project_id == p.id,
+                    m.AIRun.scope_revision == p.scope_revision, m.AIRun.backend == 'project_learning',
+                    m.AIRun.state == 'succeeded', m.AIRun.metrics['action_id'].as_string() == 'kaoyan_analyze',
+                    m.AIRun.metrics['assessment_id'].as_string() == practice.id).limit(1))
+                if not reviewed:
+                    fail(409, 'PAPER_REVIEW_REQUIRED', '请先完成原卷练习并分析本次真题作答')
         questions=[db.get(m.Question,qid) for qid in paper.contents['question_ids']]
         return save_assessment(db,p,f'{paper.year} · {paper.title} ({paper.edition})',data.mode,
                                paper.contents['minutes'],questions,paper,ctx.membership.id)
@@ -118,10 +135,7 @@ def from_past_paper(data:PastPaperInput,request:Request,ctx=Depends(context),db=
 @router.get('/assessments/{assessment_id}')
 def detail(assessment_id:str,ctx=Depends(context),db=Depends(get_db)):
     a=get_assessment(db,ctx,assessment_id)
-    p=s.project(db,ctx,a.project_id)
-    if db.scalar(select(m.Assessment.id).where(m.Assessment.project_id==p.id, m.Assessment.mode=='mock',
-            m.Assessment.state=='active', m.Assessment.id!=a.id)):
-        s.no_active_mock(db,p.id)
+    p=s.project(db,ctx,a.project_id,active=a.state=='active')
     if a.state=='needs_review':
         return {**entity(a,'id','project_id','title','mode','state','deadline_at','revision','drafts'),
                 'entries':[],'paper_objective_score':None,'server_now':s.clock().isoformat()}
@@ -132,8 +146,13 @@ def detail(assessment_id:str,ctx=Depends(context),db=Depends(get_db)):
         q=db.get(m.Question,t.payload['question_id'])
         s.material_access(db,ctx,db.get(m.Material,q.material_id))
         attempt=db.scalar(select(m.Attempt).where(m.Attempt.task_id==t.id))
+        result = attempt.result if attempt else None
+        if result and result.get('state') == 'pending_ai':
+            run = db.get(m.AIRun, result.get('run_id')) if result.get('run_id') else None
+            if run and run.state in ('failed', 'cancelled'):
+                result = {**result, 'state': 'evaluation_failed', 'feedback': '分析题暂未完成 AI 评价，作答已保存。'}
         entries.append({'task_id':t.id,'question':s.question_view(q,a.state!='active'),'points':t.payload.get('points'),
-                        'result':attempt.result if attempt else None})
+                        'result':result})
     objectives=[e for e in entries if e['points'] and e['question']['kind']!='essay']
     paper_score={'earned':sum(e['points'] for e in objectives if e['result'] and e['result'].get('correct')),
                  'possible':sum(e['points'] for e in objectives)} if objectives and a.state!='active' else None
@@ -144,7 +163,7 @@ def detail(assessment_id:str,ctx=Depends(context),db=Depends(get_db)):
 @router.put('/assessments/{assessment_id}/draft')
 def draft(assessment_id:str,data:AssessmentDraftInput,ctx=Depends(context),db=Depends(get_db)):
     a=get_assessment(db,ctx,assessment_id,lock=True)
-    if a.state!='active' or s.datetime.fromisoformat(a.deadline_at)<=s.clock():
+    if a.state!='active' or (a.deadline_at is not None and s.datetime.fromisoformat(a.deadline_at)<=s.clock()):
         fail(409,'ASSESSMENT_CLOSED','测评已结束或已到截止时间，请交卷')
     if a.revision!=data.revision:
         fail(409,'REVISION_CONFLICT','作答已在其他页面变化，请刷新')
@@ -160,11 +179,11 @@ def submit(assessment_id:str,data:SubmitInput,request:Request,ctx=Depends(contex
     p=s.project(db,ctx,a.project_id)
     s.authorized_materials(db,ctx,p)
     def save():
-        if a.state=='submitted' and s.datetime.fromisoformat(a.deadline_at)<=s.clock():
+        if a.state=='submitted' and (a.deadline_at is not None and s.datetime.fromisoformat(a.deadline_at)<=s.clock()):
             return {'id':a.id,'state':a.state,'used_saved_answers':True}
         if a.state!='active':
             fail(409,'ALREADY_SUBMITTED','测评已经提交')
-        expired=s.datetime.fromisoformat(a.deadline_at)<=s.clock()
+        expired=(a.deadline_at is not None and s.datetime.fromisoformat(a.deadline_at)<=s.clock())
         answers=a.drafts if expired else {**a.drafts,**{tid:answer.model_dump() for tid,answer in data.answers.items()}}
         finish(db,ctx,p,a,answers)
         return {'id':a.id,'state':a.state,'used_saved_answers':expired}
@@ -195,6 +214,7 @@ def finish(db,ctx,p,a,answers):
             db.add(attempt)
             db.flush()
             s.finish_answer(db,p,t,q,attempt,False,'本题未作答，建议回到资料检查。')
+            attempt.result = {**attempt.result, 'state': 'unanswered'}
         else:
             attempt,_,_,_=s.submit_answer(db,ctx,tid,value,assessment=True)
             if q.kind=='essay':
@@ -212,7 +232,7 @@ def close_expired(db,project_id,assessment_id):
     if not p:
         return False
     a=db.get(m.Assessment,assessment_id,populate_existing=True)
-    if not a or a.state!='active' or a.deadline_at>s.clock().isoformat():
+    if not a or a.state!='active' or a.deadline_at is None or a.deadline_at>s.clock().isoformat():
         return False
     t=db.get(m.Task,a.task_ids[0])
     try:

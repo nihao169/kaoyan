@@ -556,6 +556,8 @@ def queue_tutor_index(project_id: str, ctx=Depends(context), db=Depends(get_db))
 def ai(project_id: str, data: AIInput, request: Request, ctx=Depends(context), db=Depends(get_db)):
     p = s.project(db, ctx, project_id, lock=True)
     s.no_active_mock(db, p.id)
+    if p.scene_confirmed:
+        fail(409, 'LEARNING_MOVED', '请从项目的「与助教学习」继续')
     materials = s.authorized_materials(db, ctx, p)
     if not materials:
         fail(409, 'MATERIAL_REQUIRED', '请先选择课程或添加个人资料')
@@ -594,7 +596,7 @@ def ai(project_id: str, data: AIInput, request: Request, ctx=Depends(context), d
 
 def authorized_run(db, ctx, run_id):
     run = db.get(m.AIRun, run_id)
-    if not run:
+    if not run or run.backend in ('annual_draft', 'project_learning', 'personal_learning'):
         fail(404, 'NOT_FOUND', '运行不存在')
     p = s.project(db, ctx, run.project_id, active=False)
     s.no_active_mock(db, p.id)

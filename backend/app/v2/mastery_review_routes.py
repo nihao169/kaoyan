@@ -2,7 +2,7 @@
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -26,8 +26,11 @@ class ReviewAction(BaseModel):
 
 
 @router.get('/mastery-reviews')
-def queue(ctx=Depends(context), db=Depends(get_db)):
+def queue(project_id: str | None = Query(default=None), ctx=Depends(context), db=Depends(get_db)):
     need(ctx, 'student')
+    if project_id:
+        s.project(db, ctx, project_id)
+        s.no_active_mock(db, project_id)
     if not settings.deeptutor_mastery_reviews:
         return {'enabled': False, 'items': [], 'history': [], 'pending': 0, 'unavailable': False}
     bindings = []
@@ -35,7 +38,9 @@ def queue(ctx=Depends(context), db=Depends(get_db)):
     for scope in db.scalars(select(m.MasteryReviewScope).where(m.MasteryReviewScope.owner_id == ctx.user.id)
                             .order_by(m.MasteryReviewScope.created_at, m.MasteryReviewScope.id)):
         try:
-            principal, title, _ = reviews.scope_access(db, ctx, scope, study=True)
+            principal, title, material = reviews.scope_access(db, ctx, scope, study=True)
+            if project_id and (scope.kind != 'v2' or material.project_id != project_id):
+                continue
         except HTTPException:
             continue
         scope_ids.append(scope.id)
@@ -45,8 +50,12 @@ def queue(ctx=Depends(context), db=Depends(get_db)):
         m.MasteryReviewEvent.scope_id.in_(scope_ids), m.MasteryReviewEvent.state == 'queued'))
     db.commit()
     results = asyncio.run(reviews.collect(bindings))
+    db.expire_all()
     current = reviews.owner_context(db, ctx.membership.id)
     need(current, 'student')
+    if project_id:
+        s.project(db, current, project_id)
+        s.no_active_mock(db, project_id)
     items = []
     for binding, result in zip(bindings, results, strict=True):
         try:
@@ -55,6 +64,9 @@ def queue(ctx=Depends(context), db=Depends(get_db)):
             continue
         items.extend(result or [])
     items.sort(key=lambda row: not row['due'])
+    if project_id:
+        return {'enabled':True, 'items':[item for item in items if item['due']], 'history':[],
+                'pending':pending, 'unavailable':any(r is None for r in results)}
     history = []
     for task in db.scalars(select(m.Task).join(m.Project).join(m.PersonalSpace).where(
             m.PersonalSpace.user_id == ctx.user.id, m.Task.kind == 'review').order_by(m.Task.created_at.desc())):
@@ -82,10 +94,12 @@ def session(db, ctx, scope_id, operation='status', **fields):
         result = reviews.session_request(principal, path_id, operation, **fields)
     except tutor.TutorError:
         fail(503, 'DEEPTUTOR_REVIEW_UNAVAILABLE', 'DeepTutor 复习暂不可用，请稍后重试')
+    db.expire_all()
     current = reviews.owner_context(db, ctx.membership.id)
     need(current, 'student')
-    reviews.scope_access(db, current, db.get(m.MasteryReviewScope, scope_id), study=True)
-    return result
+    scope = db.get(m.MasteryReviewScope, scope_id)
+    _, _, resource = reviews.scope_access(db, current, scope, study=True)
+    return {**result, 'project_id': resource.project_id if scope.kind == 'v2' else None}
 
 
 @router.get('/mastery-reviews/{scope_id}/session')

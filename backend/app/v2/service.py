@@ -111,7 +111,7 @@ def snapshot_plan(db, p, reason):
                          'target_score': p.target_score, 'policy': p.policy}))
 
 
-def add_material(db, p, title, text, source_version_id=None, reading=True, deduplicate=True):
+def add_material(db, p, title, text, source_version_id=None, reading=True, deduplicate=True, affects_learning=True):
     digest = hashlib.sha256(text.encode()).hexdigest()
     previous = next((x for x in rows(db, m.Material, p.id) if x.sha256 == digest and x.state == 'ready'
                      and x.source_version_id == source_version_id and x.title == title), None)
@@ -120,9 +120,10 @@ def add_material(db, p, title, text, source_version_id=None, reading=True, dedup
     row = m.Material(project_id=p.id, title=title, text=text, sha256=digest, source_version_id=source_version_id)
     db.add(row)
     db.flush()
-    p.scope_revision += 1
-    p.revision += 1
-    snapshot_plan(db, p, '新增学习资料，保留历史计划')
+    if affects_learning:
+        p.scope_revision += 1
+        p.revision += 1
+        snapshot_plan(db, p, '新增学习资料，保留历史计划')
     if reading and not p.scene_confirmed:
         add_task(db, p, 'reading', f'学习：{title}', f'read:{row.id}', '先阅读资料，再通过练习检查理解', row.id, minutes=15)
     return row
@@ -143,6 +144,8 @@ def question_view(q, reveal=False):
 def finish_answer(db, p, t, q, attempt, correct, feedback, evaluator='rule', qualified=True, membership_id=None):
     attempt.result = {'correct': correct, 'feedback': feedback, 'evaluator': evaluator, 'question': question_view(q, True)}
     t.state = 'completed'
+    if q.origin in ('chapter_practice', 'personal_practice'):
+        return attempt.result
     assisted = bool(attempt.hint_used)
     independent = correct and not assisted and qualified
     kind = 'independent_pass' if independent else 'needs_remediation'

@@ -26,6 +26,38 @@ $env:LEGACY_RETRIEVAL_ENABLED='false'
 $env:PYTHONPATH=Join-Path $projectRoot 'backend'
 $env:PYTHONUTF8='1'
 $python=Join-Path $projectRoot '.venv\Scripts\python.exe'
+Write-Host 'Checking PostgreSQL readiness before starting the platform...'
+@'
+import os
+import time
+
+import psycopg
+
+dsn = os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://', 1)
+deadline = time.monotonic() + 900
+waiting = False
+while True:
+    try:
+        with psycopg.connect(dsn, connect_timeout=3):
+            break
+    except psycopg.OperationalError as error:
+        detail = str(error).lower()
+        retryable = error.sqlstate in {'57P03', '57P01'} or any(
+            message in detail for message in (
+                'the database system is starting up', 'connection refused',
+                'timeout expired', 'server closed the connection unexpectedly',
+            )
+        )
+        if not retryable:
+            raise SystemExit('PostgreSQL connection failed. Check the release database and local credentials.')
+        if time.monotonic() >= deadline:
+            raise SystemExit('PostgreSQL did not become ready within 15 minutes. Check: docker logs --tail 50 zhixing-v2-postgres-1')
+        if not waiting:
+            print('Waiting for PostgreSQL on 127.0.0.1:55433. Check Docker Desktop if this persists.', flush=True)
+            waiting = True
+        time.sleep(5)
+'@ | & $python -
+if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL readiness check failed. Migration was not started.' }
 & $python -m alembic -c backend/alembic.ini upgrade head
 if ($LASTEXITCODE -ne 0) { throw 'Release schema migration failed. No service was switched.' }
 & $python -m app.v2.bootstrap

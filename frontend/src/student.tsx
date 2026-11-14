@@ -7,7 +7,6 @@ import { ArrowRightOutlined, CheckCircleOutlined, ClockCircleOutlined, FileTextO
 import { api, key, kindName, ApiError, type Attempt, type Catalog, type Contracts, type DraftInput, type Evaluation, type GoalInput, type Task } from './api';
 import { useUser } from './App';
 import { Blank, PageTitle, Sources, State, Status, date, useRun } from './ui';
-import { MasteryReviewHistory, MasteryReviewQueue, useMasteryReviews } from './mastery-reviews';
 
 type Plan = Contracts['PlanOutput'];
 type Diag = Contracts['DiagnosticOutput'];
@@ -33,7 +32,7 @@ export function Home() {
   return <><PageTitle title={`${user.name}，今天也向前一步`} description="把时间留给思考，把每一次练习变成看得见的进步。"/>
     <div className="welcome-banner"><div><div className="banner-label">我的学习计划</div><h2>{goal.data?'按自己的节奏，稳步积累。':'先找到起点，再规划下一步。'}</h2><p>{goal.data?`每日 ${goal.data.daily_minutes} 分钟 · ${goal.data.exam_year} 年目标 · 目标 ${goal.data.target_score} 分`:'设置一个清晰的目标，完成基础诊断，我们将据此安排你的学习任务。'}</p><Link to={goal.data?'/diagnostic':'/goals'}><Button size="large">{goal.data?(diag.data?.status==='completed'?'查看诊断结果':'进行基础诊断'):'设置学习目标'} <ArrowRightOutlined aria-hidden/></Button></Link></div><div className="banner-symbol"><ReadOutlined aria-hidden/><span>知 · 行 · 进</span></div></div>
     <div className="stat-grid"><Card><Statistic title="练习任务完成" value={completed} suffix={<small>/ {total}</small>} prefix={<CheckCircleOutlined aria-hidden/>}/><p>按已保存的学习任务统计</p></Card><Card><Statistic title="到期复习" value={reviews.data?.filter(r=>r.state==='scheduled'&&r.due).length??0} suffix="项" prefix={<ClockCircleOutlined aria-hidden/>}/><p>按第 1、3、7 天逐步巩固</p></Card><Card><Statistic title="待教师评价" value={plan.data?.all_tasks.filter(t=>t.state==='pending_teacher').length??0} suffix="项" prefix={<FileTextOutlined aria-hidden/>}/><p>分析题由教师审核评分</p></Card></div>
-    <div className="dashboard-grid"><section className="panel"><div className="section-heading"><div><h2>今日学习任务</h2><p>根据目标与诊断安排，优先处理复习和补学。</p></div><Link to="/history">学习记录 <ArrowRightOutlined aria-hidden/></Link></div><State query={plan}>{plan.data?.tasks.length?<TaskList tasks={plan.data.tasks}/>:<Blank description={total?'今日安排已完成，或剩余时间不足。可展开下方其余任务继续学习。':'今天还没有待学习任务'}>{total?<Link to="/reviews"><Button>查看复习计划</Button></Link>:<Link to={goal.data?'/diagnostic':'/goals'}><Button>{goal.data?'开始基础诊断':'设置目标'}</Button></Link>}</Blank>}</State></section>
+    <div className="dashboard-grid"><section className="panel"><div className="section-heading"><div><h2>今日学习任务</h2><p>根据目标与诊断安排，优先处理复习和补学。</p></div><Link to="/history">学习记录 <ArrowRightOutlined aria-hidden/></Link></div><State query={plan}>{plan.data?.tasks.length?<TaskList tasks={plan.data.tasks}/>:<Blank description={total?'今日安排已完成，或剩余时间不足。可展开下方其余任务继续学习。':'今天还没有待学习任务'}>{total?<Link to="/learning/projects"><Button>查看学习项目</Button></Link>:<Link to={goal.data?'/diagnostic':'/goals'}><Button>{goal.data?'开始基础诊断':'设置目标'}</Button></Link>}</Blank>}</State></section>
     <aside className="panel learning-guide"><div className="guide-icon"><FlagOutlined aria-hidden/></div><h2>学习，需要一次真正的理解</h2><p>答错后先确认问题，再阅读有出处的知识卡。完成一道新题，验证是否能独立运用。</p><ol><li>保留自己的思考过程</li><li>提示逐级使用，留下记录</li><li>补学后再独立完成新题</li></ol><Link to="/mistakes"><Button block>查看错题与补学</Button></Link><div className="notice-note">当前课程为原创演示内容。正式学习范围与教学结论需教师核对。</div></aside></div>
     {!!optionalTasks.length&&<section className="section-space"><Collapse items={[{key:'optional',label:`其他可选学习任务（${optionalTasks.length} 项）`,children:<><p className="muted">今日安排按时间预算展示；你也可以根据精力选择其他已审核任务。</p><TaskList tasks={optionalTasks}/></>}]}/></section>}
     {total>0&&<section className="panel section-space"><div className="section-heading"><h2>任务进度</h2><span>{completed} / {total} 项已完成</span></div><Progress percent={Math.round(completed/total*100)} strokeColor="#477a62"/></section>}
@@ -215,19 +214,6 @@ export function Mistakes() {
   return <><PageTitle title="错题与补学" description="确认错因，回到有依据的知识，再用一道新题验证。"/><State query={query}>{!query.data?.length?<Blank description="还没有需要补学的记录。完成诊断或练习后，这里会保留相关线索。"/>:<div className="remediation-list">{query.data.map(r=><Card key={r.id} title={<span className="wrap-title">{r.prompt}</span>} extra={<Tag color={r.resolved?'green':'gold'}>{r.resolved?'已有独立正确证据':'需要补学'}</Tag>}>
     <div className="remediation-layout"><div><h3>1. 确认本次错因</h3><p className="muted">这里保留的是候选判断，你可以根据真实作答更正。</p><p>候选错因：{r.cause}</p><Select aria-label="确认错因" value={r.cause_status==='confirmed'?r.cause:undefined} placeholder="选择最符合实际的原因" style={{width:'100%',maxWidth:320}} options={causes.map(c=>({value:c,label:c}))} disabled={busy} onChange={cause=>run(()=>api('/remediations/'+r.id+'/cause','POST',{cause}),'错因已确认')}/><div className="page-actions"><Link to="/history">回看原始作答 <ArrowRightOutlined aria-hidden/></Link></div></div><div><h3>2. 阅读补学知识卡</h3>{r.card?<><div className="knowledge-card"><div className="eyebrow">知识卡 · 原创演示内容</div><h3>{r.card.title}</h3><p>{r.card.body}</p><Link to={'/sources/'+r.card.source_version_id}>查看原文出处 <ArrowRightOutlined aria-hidden/></Link></div><Space wrap><Button loading={busy} disabled={r.cause_status!=='confirmed'} onClick={()=>run(async()=>{const result=await api<{task_id:string|null;message:string}>('/remediations/'+r.id+'/read','POST');return result},'阅读记录已保存')}>{r.read?'已阅读，检查验证题':'我已阅读并理解'}</Button>{r.verification_task_id&&<Button type="primary" onClick={()=>navigate('/study/'+r.verification_task_id)}>3. 开始新题验证</Button>}</Space>{r.read&&!r.verification_task_id&&<Alert type="info" className="section-space" message="待补充验证题：审核题库中暂时没有尚未使用的新题。"/>}</>:<Alert type="info" message="暂无对应审核知识卡，请教师补充。"/>}</div></div>
   </Card>)}</div>}</State></>;
-}
-
-export function Reviews() {
-  const query=useQuery({queryKey:['reviews'],queryFn:()=>api<Review[]>('/review-schedules')});
-  const native=useMasteryReviews().data?.enabled;
-  const {run,busy}=useRun();
-  const navigate=useNavigate();
-  return <><PageTitle title={native?'复习与历史':'复习计划'} description={native?'查看 DeepTutor 的复习安排和历史记录。':'独立验证后，按第 1、3、7 天逐步巩固。到期前不提前计为完成。'}/><MasteryReviewQueue/>{native&&<h2>历史复习记录</h2>}<State query={query}>
-    {!query.data?.length?<Blank description="完成独立验证后，复习安排将出现在这里。"/>:<Table rowKey="id" dataSource={query.data} scroll={{x:700}} pagination={{pageSize:10}} columns={[
-      {title:'知识点',dataIndex:'knowledge'},{title:'阶段',dataIndex:'stage',render:v=>`第 ${v} 阶段`},{title:'安排时间',dataIndex:'due_at',render:date},{title:'状态',render:(_,r)=><><Status value={r.state}/>{r.due&&r.state==='scheduled'&&<Tag color="orange">已到期</Tag>}</>},
-      {title:'操作',render:(_,r)=>r.task_id?<Link to={'/study/'+r.task_id}><Button>查看记录</Button></Link>:native?'已归档':<Button disabled={!r.due||r.state!=='scheduled'} loading={busy} onClick={()=>run(async()=>{const result=await api<{task_id:string}>('/review-schedules/'+r.id+'/attempts','POST');navigate('/study/'+result.task_id);return result})}>开始复习</Button>},
-    ]}/>}
-  </State>{native?<MasteryReviewHistory/>:<Alert type="info" showIcon message="旧题重做与新题验证分别记录" description="复习可以重做原题；补学验证会优先使用尚未作答的新题。"/>}</>;
 }
 
 export function History() {

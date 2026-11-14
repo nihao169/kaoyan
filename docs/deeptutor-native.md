@@ -5,7 +5,7 @@
 基础镜像固定为 DeepTutor v1.7.1，摘要见 [`Dockerfile`](../integrations/deeptutor/Dockerfile)。知行只维护原生出题的题型与字段补丁。用以下命令构建预览镜像，部署时将 `ZX_DEEPTUTOR_IMAGE` 指向发布后的不可变摘要：
 
 ```powershell
-docker build --pull=false -t zhixing-deeptutor-native:1.7.1 integrations/deeptutor
+docker build --pull=false -t zhixing-deeptutor-native:1.7.1-guided integrations/deeptutor
 ```
 
 预览使用独立数据库、DeepTutor 数据目录、桥接密钥和回环端口。不要复用 5183 的业务库、`data/v2-release` 或 DeepTutor 数据卷。把 `integrations/deeptutor` 只读挂载到 `/integration`，以 `python -m uvicorn bridge:app --app-dir /integration --host 0.0.0.0 --port 8001` 启动，绑定到 `127.0.0.1:18012`。在预览数据目录的 `user/settings/auth.json` 中设置 `"enabled": true` 后再启动。通过 DeepTutor 配置命令配置模型及 384 维中文嵌入。开发机可以用 `scripts/serve_local_embeddings.py` 提供已有的多语 MiniLM 模型作为 OpenAI 兼容嵌入服务。密钥只放环境或忽略的运行目录。
@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File scripts/test-v2-postgres.ps1 -Database 
 
 `DEEPTUTOR_UNIFIED_EXECUTION=true` 统一新 AI 任务的执行后端，并停用旧检索初始化。现有历史保留，仍有已绑定的旧任务时先按原后端排空，再清理对应执行代码。全文查询和原文定位继续由知行提供。
 
-`DEEPTUTOR_MASTERY_REVIEWS` 默认关闭。开启后，学生首页和复习页读取原生 Mastery Path 队列，V1/V2 的本地复习安排保留为历史。原生掌握门槛和排期可能使历史任务的到期时间变化。学生的正式成绩仍由知行维护。
+`DEEPTUTOR_MASTERY_REVIEWS` 默认关闭。开启后，学生可从侧栏「历史复习」查看原生 Mastery Path 队列，V1/V2 的本地复习安排保留为历史。原生掌握门槛和排期可能使历史任务的到期时间变化。学生的正式成绩仍由知行维护。
 
 1. 在隔离预览加载最新版桥接，运行 `scripts/verify-mastery-reviews.py <preview>`，核对重复投递、教师评价修订、达到原生门槛后的队列、题面和真实作答后的排期。
 2. 使用专用 `zhixing_tutor_native_*` PostgreSQL、独立资料目录与 DeepTutor 数据卷，执行 Alembic 升级，再运行 `scripts/replay-mastery-reviews.py --deliver-seconds 300`。脚本按原始时间导入并输出对账计数，可重复执行。先查明所有待投递和失败路径，再用隔离浏览器验证两代作答和复习。

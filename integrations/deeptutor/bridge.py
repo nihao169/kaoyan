@@ -1,4 +1,4 @@
-"""Loaded inside the pinned DeepTutor image; no modification of upstream source.
+"""Loaded inside the pinned DeepTutor integration image.
 
 Each platform user/project/scope maps to an isolated native non-admin account.
 Only a 60-second signed exchange is exposed to the private platform network.
@@ -331,7 +331,7 @@ class KnowledgeAssertion(Assertion):
 class ProjectLearningRequest(Assertion):
     path_id: str = Field(pattern=r'^topic_[a-zA-Z0-9_-]{1,130}$')
     session_id: str = Field(min_length=1, max_length=150)
-    operation: Literal['status', 'message', 'answer', 'mode', 'read', 'notes']
+    operation: Literal['status', 'message', 'answer', 'mode', 'read', 'notes', 'brief']
     submission_id: str = Field(default='', max_length=80)
     background: str = Field(max_length=6000)
     sources: list[dict[str, str]] = Field(default_factory=list, max_length=16)
@@ -344,6 +344,29 @@ class ProjectLearningRequest(Assertion):
     note_ids: list[str] = Field(default_factory=list, max_length=20)
     notes: list[dict[str, str]] = Field(default_factory=list, max_length=20)
     reader: dict[str, str] | None = None
+    guidance: str = Field(default='', max_length=16000)
+    objective: str = Field(default='', max_length=150)
+    teach: bool = False
+
+
+async def learning_clarification(sessions, active):
+    if not active or active['status'] != 'waiting_input':
+        return None
+    turn_id = active['turn_id']
+    fallback = None
+    for event in reversed(await sessions.get_turn_events(turn_id)):
+        metadata = event.get('metadata') or {}
+        ask = metadata.get('ask_user') or (metadata.get('tool_metadata') or {}).get('ask_user')
+        if ask:
+            return {'question_id': turn_id, 'prompt': ask.get('intro') or '请回答助教的问题',
+                    'options': [], 'questions': [
+                        {'question_id': q['id'], 'prompt': q['prompt'], 'clarification': True,
+                         'options': [{'id': str(i), 'label': x['label'], 'body': x.get('description') or ''}
+                                     for i, x in enumerate(q.get('options', [])) if x.get('label')]}
+                        for q in ask.get('questions', [])]}
+        if fallback is None and event.get('type') == 'wait_for_input' and event.get('content'):
+            fallback = {'question_id': turn_id, 'prompt': str(event['content']), 'options': []}
+    return fallback
 
 
 @app.post('/internal/project-learning')
@@ -356,23 +379,27 @@ async def project_learning(data: ProjectLearningRequest, x_zhixing_signature: st
     from deeptutor.learning.pending import public_pending_question
     from deeptutor.learning.service import LearningService
     from deeptutor.learning.storage import LearningStore
+    from deeptutor.runtime.request_contracts import MasteryPathRequestConfig
     from deeptutor.multi_user.models import CurrentUser
     from deeptutor.multi_user.paths import scope_for_user, user_context
     from deeptutor.services.session import get_session_store
     from deeptutor.services.workspace.context import workspace_context
 
     check_assertion(data, x_zhixing_signature, exclude_unset=True)
+    bounded = 'zx_grade_only' in MasteryPathRequestConfig.model_fields
+    if not bounded and (data.objective or data.operation == 'brief'):
+        raise HTTPException(503, 'Rebuild the Zhixing DeepTutor integration image')
     username, user_id = execution_user(data.principal)
     user = CurrentUser(id=user_id, username=username, role='user', scope=scope_for_user(user_id, is_admin=False))
     with user_context(user), workspace_context(None):
         store, sessions, client = LearningStore(), get_session_store(), DeepTutorApp()
         progress = store.load(data.path_id)
-        main = await client.get_session(data.session_id)
+        main = await sessions.get_session(data.session_id)
         # Reading and teaching share the project identity, not the same mutable interaction.
         prefs = (main or {}).get('preferences') or {}
         readers = prefs.get('zx_readers') or {}
         reader_key = prefs.get('zx_reader', '') if data.ready else ''
-        if data.operation in ('mode', 'notes'):
+        if data.operation in ('mode', 'notes', 'brief'):
             reader_key = ''
         if data.operation != 'status':
             if not data.submission_id:
@@ -420,15 +447,21 @@ async def project_learning(data: ProjectLearningRequest, x_zhixing_signature: st
                         'reading_workspace_id': workspace_id, 'reading_material_id': doc.material_id,
                         'reading_material_revision': doc.revision}
                 await sessions.update_session_preferences(data.session_id, {'zx_readers': readers, 'zx_reader': reader_key})
-            elif data.operation in ('mode', 'notes'):
+            elif data.operation in ('mode', 'notes', 'brief'):
                 await sessions.update_session_preferences(data.session_id, {'zx_reader': ''})
 
         reading_context = readers.get(reader_key) if reader_key else None
         session_id = reading_context['session_id'] if reading_context else data.session_id
-        session = await client.get_session(session_id)
+        session = await sessions.get_session(session_id)
         active = await client.get_active_turn(session_id) if session else None
         pending = progress.pending_question if progress and not reading_context and data.ready else None
         mode = ((session or {}).get('preferences') or {}).get('mastery_session_mode') or ('study' if progress and progress.modules else 'outline')
+        followup = data.operation == 'message' and data.ready and (not reading_context or bool(active))
+        followup_id = data.session_id + '_followup'
+        followup_session = await sessions.get_session(followup_id)
+        followup_active = await client.get_active_turn(followup_id) if followup_session else None
+        recent_text = getattr(sessions, 'zx_recent_text', sessions.get_messages)
+        feedback_id = prefs.get('zx_feedback_session')
         command_id = hashlib.sha256(f'{data.session_id}:{data.submission_id}'.encode()).hexdigest()
         prior = await sessions.submission_turn(command_id) if data.submission_id else None
         # Reply commands do not create a new turn. The native coordinator keeps
@@ -438,18 +471,23 @@ async def project_learning(data: ProjectLearningRequest, x_zhixing_signature: st
             commands = await client.turns.coordinator.read_commands(reply_turn)
             prior = next((command for _, command in commands if command.command_id == command_id), None)
         if data.operation != 'status' and prior is None:
-            if active and active['status'] != 'waiting_input':
+            if followup_active or (active and active['status'] != 'waiting_input'):
                 raise HTTPException(409, 'Native learning is still running')
             if data.operation == 'mode':
                 refusal = admission_error(data.mode, has_outline=bool(progress and progress.modules))
                 if refusal:
                     raise HTTPException(409, refusal)
                 mode = data.mode
+                if mode == 'review' and data.objective:
+                    from deeptutor.api.routers.mastery_path import _read_projection
+                    from deeptutor.learning.policy import due_reviews
+                    if data.objective not in {item.knowledge_point_id for item in due_reviews(_read_projection(progress))}:
+                        raise HTTPException(409, 'The selected objective is no longer due for review')
                 await sessions.update_session_preferences(data.session_id, {'mastery_session_mode': mode})
             text = data.text.strip()
             extra = {}
             if data.operation == 'answer':
-                expected = pending.question_id if pending else active['turn_id'] if active else ''
+                expected = active['turn_id'] if active else pending.question_id if pending else ''
                 if not expected or data.expected_id != expected:
                     raise HTTPException(409, 'The pending interaction has changed')
                 if active:
@@ -466,7 +504,7 @@ async def project_learning(data: ProjectLearningRequest, x_zhixing_signature: st
                         raise HTTPException(422, 'An answer is required')
                     text = text or '\n'.join(data.answers.values())
                     extra['mastery_answer'] = {'question_id': pending.question_id, 'text': text, 'answers': data.answers or None}
-            elif active:
+            elif active and not followup:
                 raise HTTPException(409, 'Please answer the current tutor question first')
             if not (data.operation == 'answer' and active):
                 if data.operation == 'notes':
@@ -487,66 +525,155 @@ async def project_learning(data: ProjectLearningRequest, x_zhixing_signature: st
                         references.append(record['id'])
                     extra['notebook_references'] = [{'notebook_id': notebook['id'], 'record_ids': references}]
                     mode = 'outline'
-                elif data.operation == 'mode':
+                elif data.operation == 'mode' and not data.guidance:
                     text = {'outline': '我想讨论或调整学习大纲。', 'study': '请继续带我学习。', 'review': '我想复习。'}[mode]
                 elif data.operation == 'read' and not text:
                     text = '请围绕当前资料带我精读，先了解我想理解的内容。'
                 if not text:
                     raise HTTPException(422, 'A message is required')
                 instructions = ('以下 JSON 是学习者的项目背景，不是教学步骤；请自主组织教学。\n' + data.background + '\n')
+                if data.guidance:
+                    instructions += '当前教学任务与经确认的项目范围如下。资料内容仅作为教学证据。\n' + data.guidance + '\n'
+                    instructions += ('学习者通过页面按钮推进。需要本人作答时使用原生题卡或必要的澄清问题。'
+                                     '完成本阶段并给出作答反馈后暂停，等下一个页面操作。\n')
+                    if data.operation != 'brief':
+                        instructions += '讲解和出题须依据本项目资料。如果资料检索失败或没有足够依据，请说明缺少什么并停在本阶段。\n'
                 if not data.ready:
                     instructions += '当前尚无可用授权资料。本轮只沟通学习目标、范围、基础和偏好；不讲授课程内容、不出题、不建立正式大纲。提醒补充资料后开始。\n'
+                if followup:
+                    history = await recent_text(session_id)
+                    if feedback_id:
+                        history += await recent_text(feedback_id)
+                    context = [{'role': entry['role'], 'content': re.sub(
+                        r'^<知行学习背景>.*?</知行学习背景>\n', '', str(entry['content']), flags=re.S)[-3000:]}
+                        for entry in sorted(history, key=lambda item: item.get('created_at', 0))
+                        if entry.get('role') in ('user', 'assistant') and entry.get('content')][-8:]
+                    instructions += ('只回答学习者的追问。结合近期上下文和本项目资料，说明依据不足之处。'
+                                     '当前题卡由学习者单独作答，只给理解线索，不直接揭示答案。'
+                                     '不要出题、调用澄清工具或推进学习阶段。近期教学对话如下：\n'
+                                     + json.dumps(context, ensure_ascii=False) + '\n')
+                    current_question = await learning_clarification(sessions, active)
+                    if current_question is None and pending:
+                        current_question = public_pending_question(pending).to_dict()
+                    if current_question:
+                        instructions += '当前待答问题：\n' + json.dumps(current_question, ensure_ascii=False)[:6000] + '\n'
                 content = '<知行学习背景>\n' + instructions + '</知行学习背景>\n' + text
-                request = {'session_id': session_id, 'client_submission_id': command_id, 'content': content,
-                    'capability': 'immersive_reading' if reading_context else 'mastery_path' if data.ready else 'chat',
+                mastery = data.ready and data.operation != 'brief'
+                if data.operation == 'brief' or followup:
+                    request_session = followup_id if followup else data.session_id + '_brief'
+                    if not await sessions.get_session(request_session):
+                        try:
+                            await sessions.create_session('知行研学 · 阶段反馈', session_id=request_session)
+                        except sqlite3.IntegrityError:
+                            if not await sessions.get_session(request_session):
+                                raise
+                else:
+                    request_session = session_id
+                capability = 'chat'
+                if data.operation != 'brief' and not followup:
+                    capability = 'immersive_reading' if reading_context else 'mastery_path' if mastery else 'chat'
+                request = {'session_id': request_session, 'client_submission_id': command_id, 'content': content,
+                    'capability': capability,
                     'language': 'zh', 'auto_route': False, 'tools': [],
                     'knowledge_bases': [x['name'] for x in data.sources] if data.ready else []}
-                if reading_context:
+                if reading_context and data.operation != 'brief' and not followup:
                     request.update(workspace_mode='immersive_reading', reading_viewport={'locator': 0}, **reading_context)
-                elif data.ready:
+                elif data.operation == 'brief' or followup:
+                    request['config'] = {'zx_feedback_only': True}
+                elif mastery:
                     request.update(workspace_mode='mastery_path', mastery_path_id=data.path_id, mastery_session_mode=mode)
+                    if data.operation == 'answer' and pending and not active and not bounded:
+                        raise HTTPException(503, 'Rebuild the Zhixing DeepTutor integration image')
+                    if bounded:
+                        request['config'] = {
+                            'zx_grade_only': data.operation == 'answer' and bool(pending) and not active,
+                            'zx_objective': data.objective,
+                            'zx_teach': data.teach,
+                        }
                 _, started = await client.start_turn({**request, **extra})
-                await sessions.update_session_preferences(session_id, {'zx_last_turn': started['turn_id']})
+                if data.operation == 'brief':
+                    await sessions.update_session_preferences(data.session_id, {'zx_feedback_session': request_session})
+                await sessions.update_session_preferences(request_session if followup else session_id, {
+                    'zx_last_turn': started['turn_id'], 'zx_last_submission': data.submission_id,
+                })
+        elif prior and isinstance(prior, dict) and prior.get('turn_id'):
+            target_session = followup_id if followup else session_id
+            target_prefs = ((followup_session or {}).get('preferences') or {}) if followup else prefs
+            previous_submission = target_prefs.get('zx_last_submission')
+            if (not followup or prior.get('session_id') == target_session) and (
+                    not previous_submission or previous_submission == data.submission_id):
+                await sessions.update_session_preferences(target_session, {
+                    'zx_last_turn': prior['turn_id'], 'zx_last_submission': data.submission_id,
+                })
 
         progress = store.load(data.path_id) if data.ready else None
         session = await client.get_session(session_id)
         active = await client.get_active_turn(session_id) if session else None
         last_id = ((session or {}).get('preferences') or {}).get('zx_last_turn')
         last_turn = await sessions.get_turn(last_id) if last_id and not active else None
+        if last_turn and last_turn.get('status') in ('created', 'running', 'recovering', 'waiting_input'):
+            active = last_turn
         pending = progress.pending_question if progress and not reading_context else None
         messages = []
-        for message in (session or {}).get('messages', [])[-100:]:
+        transcript = await recent_text(session_id) if session else []
+        if data.operation == 'brief':
+            feedback_id = data.session_id + '_brief'
+        if feedback_id:
+            transcript += await recent_text(feedback_id)
+        if followup or followup_session:
+            transcript += await recent_text(followup_id)
+        followup_active = await client.get_active_turn(followup_id) if followup or followup_session else None
+        side_prefs = ((await sessions.get_session(followup_id) or {}).get('preferences') or {}
+                      if followup or followup_session else {})
+        side_turn_id = side_prefs.get('zx_last_turn')
+        side_turn = await sessions.get_turn(side_turn_id) if side_turn_id and not followup_active else None
+        if side_turn and side_turn.get('status') in ('created', 'running', 'recovering', 'waiting_input'):
+            followup_active = side_turn
+        for message in sorted(transcript, key=lambda item: item.get('created_at', 0))[-100:]:
             if message.get('role') in ('user', 'assistant') and isinstance(message.get('content'), str):
                 content = re.sub(r'^<知行学习背景>.*?</知行学习背景>\n', '', message['content'], flags=re.S)
+                if message['role'] == 'assistant':
+                    content = re.sub(r'最后(?:一|1)(?:道)?题', '这道题', content)
                 if content.strip():
                     messages.append({'role': message['role'], 'content': content[:30000]})
         curriculum = _topic_payload(store, data.path_id) if progress else None
-        clarification = None
-        if active and active['status'] == 'waiting_input':
-            events = await sessions.get_turn_events(active['turn_id'])
-            for event in reversed(events):
-                metadata = event.get('metadata') or {}
-                ask = metadata.get('ask_user') or (metadata.get('tool_metadata') or {}).get('ask_user')
-                if ask:
-                    clarification = {'question_id': active['turn_id'], 'prompt': ask.get('intro') or '请回答助教的问题',
-                        'options': [], 'questions': [
-                            {'question_id': q['id'], 'prompt': q['prompt'], 'options': []}
-                            for q in ask.get('questions', [])]}
-                    # Clarification options are preferences, never answer keys.
-                    for question, native in zip(clarification['questions'], ask.get('questions', [])):
-                        question['prompt'] += '\n' + '\n'.join(
-                            x.get('label', '') + ('：' + x['description'] if x.get('description') else '')
-                            for x in native.get('options', []))
-                    break
-                if event.get('type') == 'wait_for_input' and event.get('content'):
-                    clarification = {'question_id': active['turn_id'], 'prompt': str(event['content']), 'options': []}
+        if curriculum:
+            from deeptutor.api.routers.mastery_path import _read_projection
+            from deeptutor.learning.policy import due_reviews
+            eligible = {item.knowledge_point_id for item in due_reviews(_read_projection(progress))}
+            curriculum['reviews'] = [{**item, 'can_start_review': item['knowledge_point_id'] in eligible}
+                                     for item in curriculum['reviews']]
+        clarification = await learning_clarification(sessions, active)
         failed = bool(last_turn and last_turn.get('status') in ('failed', 'cancelled'))
-        return {'state': active['status'] if active else 'question' if pending else 'failed' if failed else 'idle',
-            'error': '原生教学未完成，对话和已有证据已保留。请重新发送消息继续。' if failed else '',
+        evidence = [item for item in progress.learning_evidence if item.source == 'mastery_path'] if progress else []
+        latest = evidence[-1] if evidence else None
+        recent = [{'id': item.evidence_id or item.question_id, 'question_id': item.question_id,
+                   'objective_id': item.knowledge_point_id, 'result': item.result,
+                   'timestamp': item.timestamp, 'turn_id': item.turn_id}
+                  for item in evidence[-100:]]
+        side_failed = bool(side_turn and side_turn.get('status') in ('failed', 'cancelled'))
+        side_status = followup_active['status'] if followup_active else ''
+        if side_status == 'waiting_input':
+            await client.cancel_turn(followup_active['turn_id'])
+            side_status = 'cancel_requested'
+        main_submission = ((session or {}).get('preferences') or {}).get('zx_last_submission')
+        return {'state': side_status or (active['status'] if active else 'question' if pending else 'failed' if failed else 'idle'),
+            'turn_id': active['turn_id'] if active else last_id,
+            'submission_id': main_submission,
+            'followup': {'state': side_status or ('failed' if side_failed else 'idle'), 'turn_id': side_turn_id,
+                         'submission_id': side_prefs.get('zx_last_submission')} if side_turn_id else None,
+            'error': '原生教学未完成，对话和已有证据已保留。可以重新执行当前步骤。' if failed else '',
             'intake': not data.ready, 'reading': bool(reading_context), 'mode': mode,
-            'request_id': pending.question_id if pending else active['turn_id'] if active else '',
+            'request_id': active['turn_id'] if active and active['status'] == 'waiting_input'
+                          else pending.question_id if pending else active['turn_id'] if active else '',
             'question': clarification or (public_pending_question(pending).to_dict() if pending else None),
-            'messages': messages, 'curriculum': curriculum}
+            'messages': messages, 'curriculum': curriculum,
+            'question_objective': pending.knowledge_point_id if pending else '',
+            'question_leaves': [item.question_id for item in pending.questions] if pending else [],
+            'explained': list(progress.explained_objectives) if progress else [],
+            'recent_evidence': recent,
+            'evidence': {'count': len(evidence), 'result': latest.result if latest else None,
+                         'hints': latest.hints_used if latest else None}}
 
 
 @app.post('/internal/knowledge')
@@ -645,3 +772,57 @@ async def knowledge(data: KnowledgeAssertion, background: BackgroundTasks, x_zhi
         if isinstance(body, str):
             passages = [*body[:48000].split('\n\n'), *passages]
         return {'state': 'ready', 'passages': passages[:80]}
+
+class PersonalAttemptsRequest(Assertion):
+    path_ids: list[str] = Field(max_length=200)
+
+
+@app.post('/internal/personal-attempts')
+async def personal_attempts(data: PersonalAttemptsRequest, x_zhixing_signature: str = Header(default='')):
+    """Read immutable project attempts under the project's native identity."""
+    from deeptutor.multi_user.models import CurrentUser
+    from deeptutor.multi_user.paths import scope_for_user, user_context
+    from deeptutor.services.session.sqlite_store import get_sqlite_session_store
+
+    check_assertion(data, x_zhixing_signature)
+    if not data.path_ids:
+        return {'items': []}
+    username, user_id = execution_user(data.principal)
+    user = CurrentUser(id=user_id, username=username, role='user', scope=scope_for_user(user_id, is_admin=False))
+    with user_context(user):
+        store = get_sqlite_session_store()
+        marks = ','.join('?' for _ in data.path_ids)
+        with store._connect() as conn:
+            rows = conn.execute(
+                f"""SELECT a.attempt_id, a.occurred_at, a.assessment_json,
+                           user_message.metadata_json AS request_metadata
+                    FROM assessment_attempts a LEFT JOIN turns t ON t.id=a.turn_id AND t.session_id=a.session_id
+                    LEFT JOIN messages reply ON reply.id=t.assistant_message_id AND reply.session_id=t.session_id
+                    LEFT JOIN messages user_message ON user_message.id=reply.parent_message_id
+                         AND user_message.session_id=t.session_id AND user_message.role='user'
+                    WHERE a.mastery_path_id IN ({marks})""",
+                data.path_ids,
+            )
+            items = []
+            for row in rows:
+                metadata = json.loads(row['request_metadata'] or '{}') or {}
+                snapshot = metadata.get('request_snapshot') or metadata.get('requestSnapshot') or {}
+                items.append({**json.loads(row['assessment_json']), 'id': 'check:' + row['attempt_id'],
+                              'time': row['occurred_at'], 'category': 'guided',
+                              'review_session': snapshot.get('masterySessionMode') == 'review'})
+            has_reviews = conn.execute("SELECT 1 FROM sqlite_master WHERE name='practice_review_events'").fetchone()
+            if has_reviews:
+                reviews = conn.execute(
+                    f"""SELECT e.*, n.question, n.question_type, n.options_json, n.correct_answer,
+                               n.explanation, n.mastery_path_id
+                        FROM practice_review_events e JOIN notebook_entries n ON n.id=e.entry_id
+                        WHERE n.mastery_path_id IN ({marks})""", data.path_ids,
+                )
+                for row in reviews:
+                    outcome = json.loads(row['outcome_json'])
+                    items.append({'id': 'review:' + row['request_id'], 'time': row['reviewed_at'], 'category': 'legacy',
+                                  'question': row['question'], 'question_type': row['question_type'],
+                                  'options': json.loads(row['options_json'] or '{}'), 'user_answer': row['answer'],
+                                  'correct_answer': row['correct_answer'], 'explanation': row['explanation'],
+                                  'mastery_path_id': row['mastery_path_id'], 'is_correct': outcome.get('correct')})
+    return {'items': items}

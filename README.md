@@ -46,7 +46,7 @@ powershell -ExecutionPolicy Bypass -File scripts/stop.ps1
 | 教师 | teacher | Zhixing2026! |
 | 机构管理员 | admin | Zhixing2026! |
 
-这些是本地演示账号，不应用于正式部署。教学内容均标明原创演示用途，初始状态为草稿，不自动冒充已审核内容。
+登录时填写注册时设置或管理员分配的账号名称和密码，系统会根据该账号的权限进入对应的工作台。表中的 `student`、`teacher` 和 `admin` 是本地演示账号的名称，仅用于本地演示。教学内容均标明原创演示用途，初始状态为草稿，不自动冒充已审核内容。
 
 ### 首次体验顺序
 

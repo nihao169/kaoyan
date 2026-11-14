@@ -70,6 +70,7 @@ def tick():
         material = db.get(m.Material, row.material_id)
         remove = not allowed(db, row, material)
         row_id, owner, name, previous = row.id, row.principal, row.name, row.state
+        row_error = row.error
         text = material.text if not remove else ''
         original = None
         if not remove and material.original_sha256:
@@ -85,8 +86,12 @@ def tick():
         if remove:
             tutor.knowledge_request(owner, 'delete', name)
             state = 'deleted'
-        elif settings.deeptutor_native_knowledge and previous in ('queued', 'indexing', 'ready'):
+        elif settings.deeptutor_native_knowledge and (
+                previous in ('queued', 'indexing', 'ready') or
+                (previous == 'failed' and row_error.startswith('DEEPTUTOR_KNOWLEDGE_UNAVAILABLE'))):
             state = tutor.knowledge_request(owner, 'status', name)['state']
+            if previous == 'failed' and state == 'missing':
+                state, error = 'failed', 'DeepTutor 索引不存在，请重试。'
             if previous == 'queued' and state == 'failed':
                 tutor.knowledge_request(owner, 'delete', name)
                 state = 'missing'
@@ -96,7 +101,7 @@ def tick():
                     state = tutor.knowledge_request(owner, 'create', name, text=text)['state']
             if state == 'indexing':
                 delay = 4
-            elif state == 'failed':
+            elif state == 'failed' and not error:
                 error = 'DeepTutor 索引未完成，请重试。'
     except (KeyError, tutor.TutorError) as exc:
         state = previous if remove else 'failed'
@@ -105,7 +110,7 @@ def tick():
         row = db.get(m.TutorIndex, row_id, with_for_update=True)
         if row.state == previous:
             row.state = state
-            if previous != 'failed' or error:
+            if state != 'failed' or previous != 'failed' or error:
                 row.error = error
             row.next_at = (s.clock() + timedelta(seconds=delay)).isoformat()
     return True

@@ -32,15 +32,18 @@ test('模考自动保存、助教限制与交卷反馈（受控服务）',async(
   await page.screenshot({path:'../.runtime/v2-assessment-feedback.png',fullPage:true});
 });
 
-test('个人注册不依赖教师班级',async({page})=>{
+test('个人注册不依赖教师班级，退出后使用自己的账号重新登录',async({page})=>{
+  const username='browser_'+Date.now();
+  const password='Personal2026!';
   await page.goto('/');
+  await expect(page.getByLabel('账号',{exact:true})).toBeEmpty();
   await page.getByRole('button',{name:'没有账号？开始自主学习'}).click();
-  await page.getByLabel('账号',{exact:true}).fill('browser_'+Date.now());
+  await page.getByLabel('账号',{exact:true}).fill(username);
   await page.getByLabel('称呼',{exact:true}).fill('自主学习者');
   await page.getByLabel('密码',{exact:true}).fill('123456');
   await page.getByRole('button',{name:'创建个人学习空间'}).click();
   await expect(page.getByText('密码须为 10 至 128 个字符',{exact:true})).toBeVisible();
-  await page.getByLabel('密码',{exact:true}).fill('Personal2026!');
+  await page.getByLabel('密码',{exact:true}).fill(password);
   const registered=page.waitForResponse(r=>r.url().endsWith('/api/v2/auth/register')&&r.request().method()==='POST');
   await page.getByRole('button',{name:'创建个人学习空间'}).click();
   const response=await registered;
@@ -59,6 +62,19 @@ test('个人注册不依赖教师班级',async({page})=>{
   await page.evaluate(id=>localStorage.setItem(`zhixing.learning-scene:another-student:${id}`,'final'),project.id);
   await page.goto('/learning/projects/'+project.id);
   await expect(page.getByRole('button',{name:'确认学习背景',exact:true})).toBeVisible();
+
+  await page.getByRole('button',{name:'退出登录'}).click();
+  const account=page.getByLabel('账号',{exact:true});
+  await expect(account).toBeEmpty();
+  await account.fill('student');
+  await page.getByLabel('密码',{exact:true}).fill(password);
+  await page.getByRole('button',{name:'进入工作台'}).click();
+  await expect(page.getByText('账号或密码错误',{exact:true})).toBeVisible();
+  await account.fill(username);
+  await page.getByRole('button',{name:'进入工作台'}).click();
+  await expect(page.getByRole('button',{name:'退出登录'})).toBeVisible();
+  const signedIn=(await (await page.request.get('/api/v1/me')).json()).data;
+  expect(signedIn).toMatchObject({id:me.id,username,roles:['student']});
 });
 
 test('年度模拟资源、全文命中与原文核对',async({page})=>{
@@ -72,7 +88,7 @@ test('年度模拟资源、全文命中与原文核对',async({page})=>{
   await page.getByRole('button',{name:'创建新项目'}).click();
   await page.getByLabel('项目名称').fill('年度资料验收');
   await page.getByLabel('课程名称',{exact:true}).fill('考研政治');
-  await page.getByRole('button',{name:'创建并与助教开始学习'}).click();
+  await page.getByRole('button',{name:'创建并准备资料'}).click();
   await page.getByRole('tab',{name:'年度考纲与试卷'}).click();
   await expect(page.getByRole('tab',{name:'年度考纲与试卷'})).toHaveAttribute('aria-selected','true');
   await page.getByRole('button',{name:'添加模拟资料'}).click();

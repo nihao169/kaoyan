@@ -83,19 +83,18 @@ if '--teaching' in sys.argv:
     print('native outline saved:',result['curriculum']['map']['counts']['total'],flush=True)
     if result['state']=='waiting_input':
         result=submit(owner,fields,'answer',expected_id=result['request_id'],text='确认，开始总体与样本的学习。')
-    result=submit(owner,fields,'mode',mode='study')
-    for attempt in range(3):
-        if result['state']=='question':break
-        if result['state']=='waiting_input':
-            result=submit(owner,fields,'answer',expected_id=result['request_id'],text='我已经理解刚才的讲解，请检查理解。')
-        else:
-            result=submit(owner,fields,'message',text='请依据原文用理解检查题卡检验当前知识点，不要仅靠我的自评判定掌握。')
+    objective = result['curriculum']['map']['modules'][0]['knowledge_points'][0]
+    result=submit(owner,fields,'mode',mode='study',text='讲解并检查：'+objective['name'],
+        objective=objective['id'],teach=True,
+        guidance='请讲解指定知识点，调用 mastery_note_explained 记录后，登记一道有选项的理解检查题。')
     assert result['state']=='question' and result['question'], 'Native tutor did not present a check card'
+    assert result['question_objective'] == objective['id'] and objective['id'] in result['explained']
     question=result['question']
-    answer='总体是研究对象的全体，样本是从总体中抽取的部分，随机抽样有助于减小选择偏差。'
+    answer=(question.get('options') or [{'id':'总体是研究对象的全体，样本是从总体中抽取的部分。'}])[0]['id']
     result=submit(owner,fields,'answer',expected_id=result['request_id'],text=answer,
         answers={q['question_id']:answer for q in question.get('questions',[])})
-    assert result['curriculum']
+    assert result['curriculum'] and result['state']=='idle' and not result['question']
+    assert any(e['question_id']==question['question_id'] for e in result['recent_evidence'])
     print('native check card answered; mastered:',result['curriculum']['map']['counts']['mastered'],flush=True)
 if result['state']=='waiting_input':
     result=submit(owner,fields,'answer',expected_id=result['request_id'],text='请先保留当前建议，我接下来想精读原文。')

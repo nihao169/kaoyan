@@ -1,15 +1,15 @@
+import { ProjectAttempts } from './personal-learning';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, App as AntApp, Button, Checkbox, Form, Input, InputNumber, Modal, Radio, Select, Space, Tabs, Tag } from 'antd';
 import { ArrowRightOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { apiV2, key } from './api';
 import { Blank, PageTitle, State, useRun } from './ui';
 import { CitationList, ExamResources, MaterialSearch, type Citation } from './v2-resources';
-import { MasteryReviewQueue } from './mastery-reviews';
 import { useUser } from './App';
 import { LearningSceneOptions, learningScenes, politicsPracticeNotice, readLearningScene, type LearningScene } from './v2-scenes';
-import { LearningProfileForm, ProjectLearning, NativeLearningOverview, LearningSummary, type LearningProject } from './project-learning';
+import { LearningHistory, LearningProfileForm, ProjectLearning, NativeLearningOverview, LearningSummary, type LearningProject } from './project-learning';
 import './v2.css';
 
 type Task = {id:string;project_id:string;project_title?:string;title:string;kind:string;reason:string;state:string;estimated_minutes:number;due_at?:string};
@@ -35,7 +35,7 @@ function TaskList({tasks}:{tasks:Task[]}) {
 
 export function TodayV2() {
   return <><PageTitle title="今天，从这里继续" description="带着目标和问题，与助教一起学习。" action={<StartLearning label="开始新学习"/>}/>
-    <NativeLearningOverview/><MasteryReviewQueue dueOnly/></>;
+    <NativeLearningOverview/></>;
 }
 
 export function ProjectsV2() {
@@ -70,10 +70,10 @@ function StartLearningDialog({onClose}:{onClose:()=>void}) {
   const [projectId,setProjectId] = useState<string>();
   const {run,busy} = useRun();
   const navigate = useNavigate();
-  const activeProjects = projects.data?.filter(p=>p.state==='active') ?? [];
+  const activeProjects = projects.data?.filter(p=>p.state==='active'&&p.scenario===scene) ?? [];
   const defaultYear = new Date().getFullYear()+1;
 
-  function openProject(id:string, _selected:LearningScene) {
+  function openProject(id:string) {
     onClose();
     navigate('/learning/projects/'+id);
   }
@@ -86,7 +86,7 @@ function StartLearningDialog({onClose}:{onClose:()=>void}) {
       ...(scene==='kaoyan'?{target_score:values.target_score}:{}),
       ...(scene==='final'?{deadline:values.deadline||null}:{}),
     },key()));
-    if (project) openProject(project.id, scene);
+    if (project) openProject(project.id);
   }
 
   return <Modal title={step==='choose'||!scene?'你想怎样学习？':learningScenes[scene].title} open footer={null}
@@ -105,7 +105,7 @@ function StartLearningDialog({onClose}:{onClose:()=>void}) {
         {!activeProjects.length&&<p className="muted">没有可继续的项目，可以返回创建新项目。</p>}
       </State>
       <Space wrap><Button autoInsertSpace={false} onClick={()=>setStep('choose')}>返回</Button>
-        <Button type="primary" disabled={!activeProjects.some(p=>p.id===projectId)} onClick={()=>projectId&&openProject(projectId,scene)}>打开项目</Button></Space>
+        <Button type="primary" disabled={!activeProjects.some(p=>p.id===projectId)} onClick={()=>projectId&&openProject(projectId)}>打开项目</Button></Space>
     </>}
     {step==='create'&&<>
       <Form layout="vertical" initialValues={{exam_year:defaultYear,daily_minutes:45}} onFinish={create}>
@@ -119,7 +119,7 @@ function StartLearningDialog({onClose}:{onClose:()=>void}) {
         {scene==='kaoyan'&&<Form.Item label="目标分数（可选）" name="target_score"><InputNumber min={0} max={100} precision={0}/></Form.Item>}
         {scene==='final'&&<Form.Item label="考试日期（可选）" name="deadline"><Input type="date"/></Form.Item>}
         <Space wrap><Button autoInsertSpace={false} disabled={busy} onClick={()=>setStep('choose')}>返回</Button>
-          <Button type="primary" htmlType="submit" loading={busy}>创建并与助教开始学习</Button></Space>
+          <Button type="primary" htmlType="submit" loading={busy}>创建并准备资料</Button></Space>
       </Form>
     </>}
   </Modal>;
@@ -136,22 +136,31 @@ function ProjectContent({p}:{p:Detail}) {
   const {run,busy}=useRun();
   const {modal}=AntApp.useApp();
   const [tab,setTab]=useState('study');
+  const [annualKind,setAnnualKind]=useState<'syllabus'|'past_paper'>();
   const [profileOpen,setProfileOpen]=useState(false);
   const [materialOpen,setMaterialOpen]=useState(false);
   const [uploading,setUploading]=useState(false);
   const [selectedCourse,setSelectedCourse]=useState<string>();
   const [form]=Form.useForm();
   const projectContent=useRef<HTMLElement>(null);
+  const materialInput=useRef<HTMLInputElement>(null);
   const courses=useQuery({queryKey:['v2-courses'],queryFn:()=>apiV2<{id:string;title:string;version:number}[]>('/course-materials')});
   const active=p.state==='active';
   function showTab(next:string){setTab(next);requestAnimationFrame(()=>projectContent.current?.scrollIntoView({block:'start'}));}
-  async function upload(file:File){
-    setUploading(true);const body=new FormData();body.append('file',file);
-    try{await run(()=>apiV2('/learning-projects/'+p.id+'/uploads','POST',body),'资料已导入，索引就绪后可与助教学习');}finally{setUploading(false);}
+  function chooseMaterials(){materialInput.current?.click();}
+  async function upload(files:File[]){
+    setUploading(true);
+    try {
+      for(const file of files){
+        const body=new FormData();
+        body.append('file',file);
+        await run(()=>apiV2('/learning-projects/'+p.id+'/uploads','POST',body),`已导入 ${file.name}`);
+      }
+    } finally {setUploading(false);}
   }
   const materialPanel=<><Space wrap><Button type="primary" disabled={!active} onClick={()=>setMaterialOpen(true)}>粘贴学习资料</Button>
-    <label className="v2-file-button">{uploading?'正在导入…':'上传 PDF / Word / 文本'}<input type="file" disabled={!active||uploading} accept=".pdf,.docx,.txt,.md"
-      onChange={e=>{if(e.target.files?.[0])void upload(e.target.files[0]);e.target.value='';}}/></label></Space>
+    <Button loading={uploading} disabled={!active} onClick={chooseMaterials}>上传 PDF / Word / 文本</Button>
+    {p.scenario==='kaoyan'&&<Button onClick={()=>showTab('annual')}>导入考纲或试卷</Button>}</Space>
     <div className="v2-course-picker"><Select aria-label="教师课程资料" style={{minWidth:230}} placeholder="选择教师已启用的课程资料" value={selectedCourse}
       onChange={setSelectedCourse} options={courses.data?.map(c=>({value:c.id,label:c.title+' · v'+c.version}))}/>
       <Button disabled={!active||!selectedCourse} onClick={()=>run(()=>apiV2('/learning-projects/'+p.id+'/course-materials','POST',{source_version_id:selectedCourse}),'已加入项目')}>加入课程资料</Button></div>
@@ -165,12 +174,22 @@ function ProjectContent({p}:{p:Detail}) {
     action={<Space wrap>{active&&<Button onClick={()=>setProfileOpen(true)}>调整学习背景</Button>}<Link to="/learning/projects">返回项目列表</Link></Space>}/>
     {!active&&<Alert type="info" message="项目已归档，保留历史记录"/>}
     <section ref={projectContent} className="v2-project-content" aria-label="项目学习内容" tabIndex={-1}>
+      <input ref={materialInput} type="file" hidden multiple disabled={!active||uploading} accept=".pdf,.docx,.txt,.md"
+        onChange={event=>{
+          const files=Array.from(event.currentTarget.files??[]);
+          event.currentTarget.value='';
+          if(files.length)void upload(files);
+        }}/>
       <Tabs activeKey={tab} onChange={setTab} items={[
-        {key:'study',label:'与助教学习',children:<ProjectLearning project={p} materials={p.materials} showMaterials={()=>showTab('materials')}/>},
+        {key:'study',label:'与助教学习',children:<ProjectLearning project={p} materials={p.materials} showMaterials={()=>showTab('materials')}
+          chooseMaterials={chooseMaterials} uploadingMaterials={uploading}
+          showAnnual={kind=>{setAnnualKind(kind);showTab('annual')}}/>},
         {key:'materials',label:'课程与资料',children:materialPanel},
-        ...(p.scenario==='kaoyan'?[{key:'annual',label:'年度考纲与试卷',children:<ExamResources projectId={p.id} examYear={p.exam_year} active={active}/>}]:[]),
+        ...(p.scenario==='kaoyan'?[{key:'annual',label:'年度考纲与试卷',children:<ExamResources projectId={p.id} examYear={p.exam_year}
+          active={active} draftKind={annualKind} closeDraft={()=>setAnnualKind(undefined)} returnToStudy={()=>showTab('study')}
+          chooseMaterials={chooseMaterials} uploadingMaterials={uploading}/>}]:[]),
         {key:'notes',label:'笔记与闪卡',children:<NotesPanel projectId={p.id} disabled={!active}/>},
-        {key:'history',label:'历史学习记录',children:<><p className="muted">此前的任务与证据保留查阅。当前教学和掌握进度见“与助教学习”。</p><TaskList tasks={p.tasks}/><ChatHistory projectId={p.id}/><ReportPanel report={p.report}/></>},
+        {key:'history',label:'历史学习记录',children:<><p className="muted">此前的任务与证据保留查阅。当前教学和掌握进度见“与助教学习”。</p><LearningHistory projectId={p.id}/><TaskList tasks={p.tasks}/><ChatHistory projectId={p.id}/><ReportPanel report={p.report}/></>},
         {key:'plan',label:'计划设置',children:<><Form layout="vertical" key={p.revision} initialValues={{daily_minutes:p.daily_minutes,target_score:p.target_score,deadline:p.deadline}}
           onFinish={values=>run(()=>apiV2('/learning-projects/'+p.id+'/plans','POST',{...values,deadline:values.deadline||null,revision:p.revision},key()),'时间与目标已更新')}>
           <Form.Item name="daily_minutes" label="每日时间预算（分钟）"><InputNumber min={10} max={480} disabled={!active}/></Form.Item>
@@ -325,12 +344,9 @@ function StudyContent({data}:{data:StudyData}) {
   </section></div></>;
 }
 
-export function LibraryV2() {
-  const q=useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<Project[]>('/learning-projects')});
-  return <><PageTitle title="资料与笔记" description="资料和自己的理解，都归属于明确的学习项目。"/><State query={q}>{q.data?.length?q.data.map(p=><div className="v2-material" key={p.id}><div><h3>{p.title}</h3><p>课程资料 · 个人资料 · 笔记 · 闪卡</p></div><Link to={'/learning/projects/'+p.id}><Button>打开项目资料</Button></Link></div>):<Blank description="先创建学习项目，再添加资料和笔记。"/>}</State></>;
-}
-
 export function ReportsV2() {
+  const [search]=useSearchParams();
+  const source=search.get('source')==='review'?'review':undefined;
   const q=useQuery({queryKey:['v2-projects'],queryFn:()=>apiV2<Project[]>('/learning-projects')});
   const [id,setId]=useState<string>();
   const selected=id||q.data?.[0]?.id;
@@ -338,5 +354,6 @@ export function ReportsV2() {
   const project=q.data?.find(p=>p.id===selected);
   return <><PageTitle title="学习报告" description="查看助教学习进度与已经发生的作答证据。"/><Select style={{minWidth:240,marginBottom:24}} placeholder="选择学习项目" value={selected} onChange={setId} options={q.data?.map(p=>({value:p.id,label:p.title}))}/>
     {project&&<LearningSummary project={project}/>}
+    {selected&&<section className="panel section-space"><h2>作答记录</h2><ProjectAttempts key={selected+":"+source} projectId={selected} initialSource={source}/></section>}
     {selected?<State query={report}><h2>历史作答证据</h2>{report.data&&<ReportPanel report={report.data}/>}</State>:<Blank description="创建项目并开始学习后，将逐步形成报告。"/>}</>;
 }

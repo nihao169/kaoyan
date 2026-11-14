@@ -50,12 +50,12 @@ if ($Release) {
     if ($LASTEXITCODE -ne 0) { throw 'Account initialization failed.' }
 }
 if (-not $SkipTutor) {
-    if ($Release -and !$env:ZX_DEEPTUTOR_IMAGE) {
-        $env:ZX_DEEPTUTOR_IMAGE = 'zhixing-deeptutor-native:1.7.1'
+    if (!$env:ZX_DEEPTUTOR_IMAGE) {
+        $env:ZX_DEEPTUTOR_IMAGE = 'zhixing-deeptutor-native:1.7.1-guided'
         & docker image inspect $env:ZX_DEEPTUTOR_IMAGE 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
             & docker build --pull=false -t $env:ZX_DEEPTUTOR_IMAGE integrations/deeptutor
-            if ($LASTEXITCODE -ne 0) { throw 'Pinned DeepTutor release image build failed.' }
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned DeepTutor integration image build failed.' }
         }
     }
     New-Item -ItemType Directory -Force 'data\v2-deeptutor' | Out-Null
